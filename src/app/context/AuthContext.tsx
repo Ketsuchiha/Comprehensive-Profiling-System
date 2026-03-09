@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { api } from '../utils/api';
 
 interface User {
   id: string;
@@ -20,7 +21,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
-    // Check if user is logged in on mount
     const storedUser = localStorage.getItem('ccs_user');
     if (storedUser) {
       setUser(JSON.parse(storedUser));
@@ -28,58 +28,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = async (email: string, password: string): Promise<boolean> => {
-    // Get stored users
-    const users = JSON.parse(localStorage.getItem('ccs_users') || '[]');
-    
-    // Find user with matching credentials
-    const foundUser = users.find(
-      (u: any) => u.email === email && u.password === password
-    );
-
-    if (foundUser) {
-      const userData = {
-        id: foundUser.id,
-        email: foundUser.email,
-        name: foundUser.name,
+    try {
+      const data = await api.post<{ user: { user_id: number; username: string; user_type: string; ref_id: string } }>('/auth/login', {
+        username: email,
+        password,
+      });
+      const userData: User = {
+        id: String(data.user.user_id),
+        email: data.user.username,
+        name: data.user.username,
       };
       setUser(userData);
       localStorage.setItem('ccs_user', JSON.stringify(userData));
       return true;
+    } catch {
+      return false;
     }
-    
-    return false;
   };
 
   const register = async (email: string, password: string, name: string): Promise<boolean> => {
-    // Get existing users
-    const users = JSON.parse(localStorage.getItem('ccs_users') || '[]');
-    
-    // Check if email already exists
-    if (users.some((u: any) => u.email === email)) {
+    try {
+      const data = await api.post<{ user: { user_id: number; username: string } }>('/auth/register', {
+        username: email,
+        password,
+        user_type: 'Admin',
+        ref_id: name,
+      });
+      const userData: User = {
+        id: String(data.user.user_id),
+        email: data.user.username,
+        name: name,
+      };
+      setUser(userData);
+      localStorage.setItem('ccs_user', JSON.stringify(userData));
+      return true;
+    } catch {
       return false;
     }
-
-    // Create new user
-    const newUser = {
-      id: Date.now().toString(),
-      email,
-      password,
-      name,
-    };
-
-    users.push(newUser);
-    localStorage.setItem('ccs_users', JSON.stringify(users));
-
-    // Auto-login after registration
-    const userData = {
-      id: newUser.id,
-      email: newUser.email,
-      name: newUser.name,
-    };
-    setUser(userData);
-    localStorage.setItem('ccs_user', JSON.stringify(userData));
-    
-    return true;
   };
 
   const logout = () => {
