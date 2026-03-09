@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { FileText, Download, Upload, Plus, Search, X } from "lucide-react";
+import { api } from "../utils/api";
 
 interface Instrument {
   id: string;
@@ -10,63 +11,6 @@ interface Instrument {
   uploadDate: string;
   fileSize: string;
 }
-
-const mockInstruments: Instrument[] = [
-  {
-    id: "1",
-    title: "CS101 Course Syllabus - First Semester",
-    type: "syllabus",
-    courseCode: "CS101",
-    instructor: "Prof. Ana Reyes",
-    uploadDate: "2026-01-15",
-    fileSize: "2.4 MB",
-  },
-  {
-    id: "2",
-    title: "Week 5: Data Structures - Arrays and Lists",
-    type: "lesson",
-    courseCode: "CS102",
-    instructor: "Dr. Roberto Fernandez",
-    uploadDate: "2026-02-10",
-    fileSize: "1.8 MB",
-  },
-  {
-    id: "3",
-    title: "Database Design Project - Conclusion Report",
-    type: "conclusion",
-    courseCode: "CS201",
-    instructor: "Dr. Carlos Martinez",
-    uploadDate: "2026-02-28",
-    fileSize: "3.2 MB",
-  },
-  {
-    id: "4",
-    title: "CS301 Web Development Syllabus",
-    type: "syllabus",
-    courseCode: "CS301",
-    instructor: "Prof. Sofia Mendoza",
-    uploadDate: "2026-01-20",
-    fileSize: "2.1 MB",
-  },
-  {
-    id: "5",
-    title: "Week 8: Algorithm Analysis - Sorting Techniques",
-    type: "lesson",
-    courseCode: "CS202",
-    instructor: "Dr. Roberto Fernandez",
-    uploadDate: "2026-02-15",
-    fileSize: "2.7 MB",
-  },
-  {
-    id: "6",
-    title: "Software Engineering Capstone - Final Conclusion",
-    type: "conclusion",
-    courseCode: "CS401",
-    instructor: "Dr. Carlos Martinez",
-    uploadDate: "2026-03-01",
-    fileSize: "4.5 MB",
-  },
-];
 
 const typeColors = {
   syllabus: "bg-blue-100 text-blue-700",
@@ -81,7 +25,7 @@ const typeIcons = {
 };
 
 export function Instruments() {
-  const [instruments, setInstruments] = useState<Instrument[]>(mockInstruments);
+  const [instruments, setInstruments] = useState<Instrument[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedType, setSelectedType] = useState<string>("all");
   const [showAddModal, setShowAddModal] = useState(false);
@@ -94,6 +38,38 @@ export function Instruments() {
     fileSize: "",
   });
 
+  const fetchInstruments = async () => {
+    try {
+      const [syllabi, lessons] = await Promise.all([
+        api.get<any[]>('/instruments/syllabus').catch(() => []),
+        api.get<any[]>('/instruments/lessons').catch(() => []),
+      ]);
+      const syllabusItems: Instrument[] = (syllabi || []).map(s => ({
+        id: String(s.syllabus_id || s.id),
+        title: `${s.subject_name || s.subject_code || ''} Syllabus`,
+        type: 'syllabus' as const,
+        courseCode: s.subject_code || '',
+        instructor: `${s.faculty_first_name || ''} ${s.faculty_last_name || ''}`.trim(),
+        uploadDate: s.created_at ? s.created_at.split('T')[0] : '',
+        fileSize: 'N/A',
+      }));
+      const lessonItems: Instrument[] = (lessons || []).map(l => ({
+        id: String(l.lesson_id || l.id),
+        title: l.title || '',
+        type: 'lesson' as const,
+        courseCode: l.subject_code || '',
+        instructor: `${l.faculty_first_name || ''} ${l.faculty_last_name || ''}`.trim(),
+        uploadDate: l.created_at ? l.created_at.split('T')[0] : '',
+        fileSize: 'N/A',
+      }));
+      setInstruments([...syllabusItems, ...lessonItems]);
+    } catch (err) {
+      console.error('Failed to fetch instruments:', err);
+    }
+  };
+
+  useEffect(() => { fetchInstruments(); }, []);
+
   const filteredInstruments = instruments.filter((item) => {
     const matchesSearch = item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       item.courseCode.toLowerCase().includes(searchQuery.toLowerCase());
@@ -101,12 +77,19 @@ export function Instruments() {
     return matchesSearch && matchesType;
   });
 
-  const handleAddInstrument = () => {
-    const newInstrument: Instrument = {
-      ...formData,
-      id: Date.now().toString(),
-    };
-    setInstruments([...instruments, newInstrument]);
+  const handleAddInstrument = async () => {
+    try {
+      const endpoint = formData.type === 'syllabus'
+        ? '/instruments/syllabus'
+        : '/instruments/lessons';
+      await api.post(endpoint, {
+        title: formData.title,
+        subject_code: formData.courseCode,
+      });
+      await fetchInstruments();
+    } catch (err) {
+      console.error('Failed to add instrument:', err);
+    }
     setShowAddModal(false);
     setFormData({
       title: "",

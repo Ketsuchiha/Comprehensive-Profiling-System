@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Search, Plus, Edit, Trash2, Eye, X } from "lucide-react";
+import { api } from "../utils/api";
 
 interface Student {
   id: string;
@@ -17,56 +18,8 @@ interface Student {
   emergencyContactNumber: string;
 }
 
-const mockStudents: Student[] = [
-  {
-    id: "1",
-    studentId: "2021-00001",
-    firstName: "Juan",
-    middleName: "Santos",
-    lastName: "dela Cruz",
-    dateOfBirth: "2004-05-15",
-    sex: "Male",
-    civilStatus: "Single",
-    contactNumber: "+63 912 345 6789",
-    email: "juan.delacruz@student.edu",
-    address: "123 Main St, Cabuyao City",
-    emergencyContact: "Maria dela Cruz",
-    emergencyContactNumber: "+63 912 345 6788",
-  },
-  {
-    id: "2",
-    studentId: "2021-00002",
-    firstName: "Maria",
-    middleName: "Garcia",
-    lastName: "Santos",
-    dateOfBirth: "2005-08-22",
-    sex: "Female",
-    civilStatus: "Single",
-    contactNumber: "+63 923 456 7890",
-    email: "maria.santos@student.edu",
-    address: "456 Rizal Ave, Cabuyao City",
-    emergencyContact: "Jose Santos",
-    emergencyContactNumber: "+63 923 456 7891",
-  },
-  {
-    id: "3",
-    studentId: "2020-00015",
-    firstName: "Pedro",
-    middleName: "Ramos",
-    lastName: "Garcia",
-    dateOfBirth: "2003-12-10",
-    sex: "Male",
-    civilStatus: "Single",
-    contactNumber: "+63 934 567 8901",
-    email: "pedro.garcia@student.edu",
-    address: "789 Luna St, Cabuyao City",
-    emergencyContact: "Ana Garcia",
-    emergencyContactNumber: "+63 934 567 8902",
-  },
-];
-
 export function StudentProfile() {
-  const [students, setStudents] = useState<Student[]>(mockStudents);
+  const [students, setStudents] = useState<Student[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [showModal, setShowModal] = useState(false);
@@ -86,6 +39,31 @@ export function StudentProfile() {
     emergencyContactNumber: "",
   });
 
+  const fetchStudents = async () => {
+    try {
+      const data = await api.get<any[]>('/students');
+      setStudents(data.map(s => ({
+        id: s.student_id,
+        studentId: s.student_id,
+        firstName: s.first_name,
+        middleName: s.middle_name || '',
+        lastName: s.last_name,
+        dateOfBirth: s.birth_date ? s.birth_date.split('T')[0] : '',
+        sex: s.sex || '',
+        civilStatus: s.civil_status || '',
+        contactNumber: s.contact_number || '',
+        email: s.email || '',
+        address: s.address || '',
+        emergencyContact: s.emergency_contact || '',
+        emergencyContactNumber: s.emergency_contact_num || '',
+      })));
+    } catch (err) {
+      console.error('Failed to fetch students:', err);
+    }
+  };
+
+  useEffect(() => { fetchStudents(); }, []);
+
   const filteredStudents = students.filter((student) =>
     `${student.firstName} ${student.lastName}`.toLowerCase().includes(searchQuery.toLowerCase()) ||
     student.studentId.toLowerCase().includes(searchQuery.toLowerCase())
@@ -96,12 +74,26 @@ export function StudentProfile() {
     setShowModal(true);
   };
 
-  const handleAddStudent = () => {
-    const newStudent: Student = {
-      ...formData,
-      id: Date.now().toString(),
-    };
-    setStudents([...students, newStudent]);
+  const handleAddStudent = async () => {
+    try {
+      await api.post('/students', {
+        student_id: formData.studentId,
+        first_name: formData.firstName,
+        middle_name: formData.middleName,
+        last_name: formData.lastName,
+        birth_date: formData.dateOfBirth,
+        sex: formData.sex,
+        civil_status: formData.civilStatus,
+        contact_number: formData.contactNumber,
+        email: formData.email,
+        address: formData.address,
+        emergency_contact: formData.emergencyContact,
+        emergency_contact_num: formData.emergencyContactNumber,
+      });
+      await fetchStudents();
+    } catch (err) {
+      console.error('Failed to add student:', err);
+    }
     setShowAddModal(false);
     setFormData({
       studentId: "",
@@ -119,9 +111,14 @@ export function StudentProfile() {
     });
   };
 
-  const handleDeleteStudent = (id: string) => {
+  const handleDeleteStudent = async (id: string) => {
     if (confirm("Are you sure you want to delete this student?")) {
-      setStudents(students.filter(s => s.id !== id));
+      try {
+        await api.delete(`/students/${id}`);
+        await fetchStudents();
+      } catch (err) {
+        console.error('Failed to delete student:', err);
+      }
     }
   };
 

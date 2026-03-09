@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Calendar as CalendarIcon, Plus, MapPin, Users, Clock, X } from "lucide-react";
+import { api } from "../utils/api";
 
 interface Event {
   id: string;
@@ -12,49 +13,6 @@ interface Event {
   type: "seminar" | "workshop" | "conference" | "meeting";
 }
 
-const mockEvents: Event[] = [
-  {
-    id: "1",
-    title: "Computer Science Research Symposium",
-    date: "2026-03-15",
-    time: "9:00 AM - 5:00 PM",
-    location: "CCS Auditorium",
-    description: "Annual research symposium showcasing student and faculty research projects",
-    attendees: 150,
-    type: "conference",
-  },
-  {
-    id: "2",
-    title: "Web Development Workshop",
-    date: "2026-03-20",
-    time: "2:00 PM - 4:00 PM",
-    location: "Lab Room 301",
-    description: "Hands-on workshop on modern web development frameworks",
-    attendees: 45,
-    type: "workshop",
-  },
-  {
-    id: "3",
-    title: "Faculty Meeting",
-    date: "2026-03-08",
-    time: "3:00 PM - 5:00 PM",
-    location: "Conference Room A",
-    description: "Monthly faculty meeting to discuss curriculum updates",
-    attendees: 25,
-    type: "meeting",
-  },
-  {
-    id: "4",
-    title: "Artificial Intelligence Seminar",
-    date: "2026-03-25",
-    time: "10:00 AM - 12:00 PM",
-    location: "CCS Auditorium",
-    description: "Guest speaker on recent advances in AI and machine learning",
-    attendees: 200,
-    type: "seminar",
-  },
-];
-
 const typeColors = {
   seminar: "bg-blue-100 text-blue-700",
   workshop: "bg-green-100 text-green-700",
@@ -62,8 +20,27 @@ const typeColors = {
   meeting: "bg-orange-100 text-orange-700",
 };
 
+function mapEventType(eventType: string): Event["type"] {
+  switch (eventType) {
+    case "Seminar": return "seminar";
+    case "Academic": return "conference";
+    case "Sports":
+    case "Cultural":
+    case "Organizational": return "workshop";
+    default: return "meeting";
+  }
+}
+
+function formatTime(dateStr: string): string {
+  if (!dateStr) return '';
+  try {
+    const d = new Date(dateStr);
+    return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  } catch { return ''; }
+}
+
 export function Events() {
-  const [events, setEvents] = useState<Event[]>(mockEvents);
+  const [events, setEvents] = useState<Event[]>([]);
   const [selectedType, setSelectedType] = useState<string>("all");
   const [showAddModal, setShowAddModal] = useState(false);
   const [formData, setFormData] = useState<Omit<Event, "id">>({
@@ -76,16 +53,61 @@ export function Events() {
     type: "seminar",
   });
 
+  const fetchEvents = async () => {
+    try {
+      const data = await api.get<any[]>('/events');
+      setEvents(data.map(e => {
+        const startDate = e.start_date ? e.start_date.split('T')[0] : '';
+        const startTime = e.start_date ? formatTime(e.start_date) : '';
+        const endTime = e.end_date ? formatTime(e.end_date) : '';
+        const time = startTime && endTime ? `${startTime} - ${endTime}` : startTime;
+        return {
+          id: String(e.event_id),
+          title: e.title || '',
+          date: startDate,
+          time,
+          location: e.venue || '',
+          description: e.description || '',
+          attendees: e.participant_count || 0,
+          type: mapEventType(e.event_type),
+        };
+      }));
+    } catch (err) {
+      console.error('Failed to fetch events:', err);
+    }
+  };
+
+  useEffect(() => { fetchEvents(); }, []);
+
   const filteredEvents = selectedType === "all" 
     ? events 
     : events.filter(event => event.type === selectedType);
 
-  const handleAddEvent = () => {
-    const newEvent: Event = {
-      ...formData,
-      id: Date.now().toString(),
-    };
-    setEvents([...events, newEvent]);
+  const handleAddEvent = async () => {
+    try {
+      const reverseTypeMap: Record<string, string> = {
+        seminar: "Seminar",
+        conference: "Academic",
+        workshop: "Sports",
+        meeting: "Other",
+      };
+      const startDateTime = formData.date ? `${formData.date}T09:00:00` : '';
+      const endDateTime = formData.date ? `${formData.date}T17:00:00` : '';
+      await api.post('/events', {
+        title: formData.title,
+        description: formData.description,
+        event_type: reverseTypeMap[formData.type] || 'Other',
+        venue: formData.location,
+        start_date: startDateTime,
+        end_date: endDateTime,
+        organizer: '',
+        is_mandatory: false,
+        status: 'Upcoming',
+      });
+      await fetchEvents();
+    } catch (err) {
+      console.error('Failed to add event:', err);
+    }
     setShowAddModal(false);
     setFormData({
       title: "",

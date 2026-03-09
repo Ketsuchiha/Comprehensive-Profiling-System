@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Clock, Plus, Filter, X } from "lucide-react";
+import { api } from "../utils/api";
 
 interface Schedule {
   id: string;
@@ -13,79 +14,10 @@ interface Schedule {
   section: string;
 }
 
-const mockSchedules: Schedule[] = [
-  {
-    id: "1",
-    courseCode: "CS101",
-    courseName: "Introduction to Programming",
-    instructor: "Prof. Ana Reyes",
-    room: "Lab 301",
-    day: "Monday",
-    timeStart: "8:00 AM",
-    timeEnd: "10:00 AM",
-    section: "CS-1A",
-  },
-  {
-    id: "2",
-    courseCode: "CS102",
-    courseName: "Data Structures",
-    instructor: "Dr. Roberto Fernandez",
-    room: "Lab 302",
-    day: "Monday",
-    timeStart: "10:00 AM",
-    timeEnd: "12:00 PM",
-    section: "CS-2A",
-  },
-  {
-    id: "3",
-    courseCode: "CS201",
-    courseName: "Database Management",
-    instructor: "Dr. Carlos Martinez",
-    room: "Lab 303",
-    day: "Tuesday",
-    timeStart: "1:00 PM",
-    timeEnd: "3:00 PM",
-    section: "CS-2B",
-  },
-  {
-    id: "4",
-    courseCode: "CS301",
-    courseName: "Web Development",
-    instructor: "Prof. Sofia Mendoza",
-    room: "Lab 301",
-    day: "Wednesday",
-    timeStart: "8:00 AM",
-    timeEnd: "10:00 AM",
-    section: "CS-3A",
-  },
-  {
-    id: "5",
-    courseCode: "CS202",
-    courseName: "Algorithms",
-    instructor: "Dr. Roberto Fernandez",
-    room: "Lab 302",
-    day: "Thursday",
-    timeStart: "2:00 PM",
-    timeEnd: "4:00 PM",
-    section: "CS-2C",
-  },
-  {
-    id: "6",
-    courseCode: "CS401",
-    courseName: "Software Engineering",
-    instructor: "Dr. Carlos Martinez",
-    room: "Lab 303",
-    day: "Friday",
-    timeStart: "10:00 AM",
-    timeEnd: "12:00 PM",
-    section: "CS-4A",
-  },
-];
-
 const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 export function Scheduling() {
-  const [schedules, setSchedules] = useState<Schedule[]>(mockSchedules);
+  const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [selectedDay, setSelectedDay] = useState<string>("all");
   const [showAddModal, setShowAddModal] = useState(false);
   const [formData, setFormData] = useState<Omit<Schedule, "id">>({
@@ -99,16 +31,44 @@ export function Scheduling() {
     section: "",
   });
 
+  const fetchSchedules = async () => {
+    try {
+      const data = await api.get<any[]>('/schedules');
+      setSchedules(data.map(s => ({
+        id: String(s.schedule_id),
+        courseCode: s.subject_code || '',
+        courseName: s.subject_name || '',
+        instructor: `${s.faculty_first_name || ''} ${s.faculty_last_name || ''}`.trim(),
+        room: s.room_name || '',
+        day: s.day_of_week || '',
+        timeStart: s.start_time || '',
+        timeEnd: s.end_time || '',
+        section: s.section || '',
+      })));
+    } catch (err) {
+      console.error('Failed to fetch schedules:', err);
+    }
+  };
+
+  useEffect(() => { fetchSchedules(); }, []);
+
   const filteredSchedules = selectedDay === "all"
     ? schedules
     : schedules.filter((schedule) => schedule.day === selectedDay);
 
-  const handleAddSchedule = () => {
-    const newSchedule: Schedule = {
-      ...formData,
-      id: Date.now().toString(),
-    };
-    setSchedules([...schedules, newSchedule]);
+  const handleAddSchedule = async () => {
+    try {
+      await api.post('/schedules', {
+        subject_code: formData.courseCode,
+        section: formData.section,
+        day_of_week: formData.day,
+        start_time: formData.timeStart,
+        end_time: formData.timeEnd,
+      });
+      await fetchSchedules();
+    } catch (err) {
+      console.error('Failed to add schedule:', err);
+    }
     setShowAddModal(false);
     setFormData({
       courseCode: "",

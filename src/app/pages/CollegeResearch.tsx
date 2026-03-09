@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Search, Plus, FileText, Users, Calendar, X } from "lucide-react";
+import { api } from "../utils/api";
 
 interface Research {
   id: string;
@@ -12,67 +13,23 @@ interface Research {
   collaborators: number;
 }
 
-const mockResearch: Research[] = [
-  {
-    id: "1",
-    title: "Machine Learning Applications in Education",
-    author: "Dr. Roberto Fernandez",
-    category: "Artificial Intelligence",
-    status: "ongoing",
-    startDate: "2025-09-01",
-    description: "Exploring the use of machine learning algorithms to personalize learning experiences for students",
-    collaborators: 3,
-  },
-  {
-    id: "2",
-    title: "Blockchain Technology for Academic Records",
-    author: "Dr. Carlos Martinez",
-    category: "Blockchain",
-    status: "completed",
-    startDate: "2024-06-15",
-    description: "Implementation of blockchain-based system for secure and transparent academic record management",
-    collaborators: 5,
-  },
-  {
-    id: "3",
-    title: "Mobile App Development Frameworks Comparison",
-    author: "Prof. Sofia Mendoza",
-    category: "Mobile Development",
-    status: "published",
-    startDate: "2024-03-10",
-    description: "Comparative study of modern mobile development frameworks and their performance metrics",
-    collaborators: 2,
-  },
-  {
-    id: "4",
-    title: "Cybersecurity in IoT Devices",
-    author: "Prof. Ana Reyes",
-    category: "Cybersecurity",
-    status: "ongoing",
-    startDate: "2025-11-01",
-    description: "Research on security vulnerabilities in Internet of Things devices and mitigation strategies",
-    collaborators: 4,
-  },
-  {
-    id: "5",
-    title: "Cloud Computing Cost Optimization",
-    author: "Dr. Roberto Fernandez",
-    category: "Cloud Computing",
-    status: "completed",
-    startDate: "2024-08-20",
-    description: "Analysis of cost optimization strategies for cloud-based applications in educational institutions",
-    collaborators: 3,
-  },
-];
-
 const statusColors = {
   ongoing: "bg-blue-100 text-blue-700",
   completed: "bg-green-100 text-green-700",
   published: "bg-purple-100 text-purple-700",
 };
 
+function mapResearchStatus(status: string): Research["status"] {
+  switch (status) {
+    case "Ongoing": return "ongoing";
+    case "Completed": return "completed";
+    case "Published": return "published";
+    default: return "ongoing";
+  }
+}
+
 export function CollegeResearch() {
-  const [research, setResearch] = useState<Research[]>(mockResearch);
+  const [research, setResearch] = useState<Research[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedStatus, setSelectedStatus] = useState<string>("all");
   const [showAddModal, setShowAddModal] = useState(false);
@@ -86,6 +43,26 @@ export function CollegeResearch() {
     collaborators: 0,
   });
 
+  const fetchResearch = async () => {
+    try {
+      const data = await api.get<any[]>('/research');
+      setResearch(data.map(r => ({
+        id: String(r.project_id),
+        title: r.title || '',
+        author: r.funding_source || 'N/A',
+        category: r.research_type || '',
+        status: mapResearchStatus(r.status),
+        startDate: r.start_date ? r.start_date.split('T')[0] : '',
+        description: r.abstract || '',
+        collaborators: r.member_count || 0,
+      })));
+    } catch (err) {
+      console.error('Failed to fetch research:', err);
+    }
+  };
+
+  useEffect(() => { fetchResearch(); }, []);
+
   const filteredResearch = research.filter((item) => {
     const matchesSearch = item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       item.author.toLowerCase().includes(searchQuery.toLowerCase());
@@ -93,12 +70,25 @@ export function CollegeResearch() {
     return matchesSearch && matchesStatus;
   });
 
-  const handleAddResearch = () => {
-    const newResearch: Research = {
-      ...formData,
-      id: Date.now().toString(),
-    };
-    setResearch([...research, newResearch]);
+  const handleAddResearch = async () => {
+    try {
+      const reverseStatusMap: Record<string, string> = {
+        ongoing: "Ongoing",
+        completed: "Completed",
+        published: "Published",
+      };
+      await api.post('/research', {
+        title: formData.title,
+        abstract: formData.description,
+        research_type: formData.category,
+        status: reverseStatusMap[formData.status] || 'Ongoing',
+        start_date: formData.startDate,
+        funding_source: formData.author,
+      });
+      await fetchResearch();
+    } catch (err) {
+      console.error('Failed to add research:', err);
+    }
     setShowAddModal(false);
     setFormData({
       title: "",
