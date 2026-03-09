@@ -44,7 +44,7 @@ router.post('/', async (req, res) => {
 
     const [result] = await pool.query(
       'INSERT INTO curriculum (program, version, cmo_reference, effectivity_year, is_active, description) VALUES (?, ?, ?, ?, ?, ?)',
-      [program, version || null, cmo_reference || null, effectivity_year || null, is_active != null ? is_active : 1, description || null]
+      [program, version || null, cmo_reference || null, effectivity_year || null, is_active ?? 1, description || null]
     );
 
     res.status(201).json({ message: 'Curriculum created successfully', curriculum_id: result.insertId });

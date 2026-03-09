@@ -41,8 +41,8 @@ export function Instruments() {
   const fetchInstruments = async () => {
     try {
       const [syllabi, lessons] = await Promise.all([
-        api.get<any[]>('/instruments/syllabus').catch(() => []),
-        api.get<any[]>('/instruments/lessons').catch(() => []),
+        api.get<any[]>('/instruments/syllabus').catch((err) => { console.error('Failed to fetch syllabi:', err); return []; }),
+        api.get<any[]>('/instruments/lessons').catch((err) => { console.error('Failed to fetch lessons:', err); return []; }),
       ]);
       const syllabusItems: Instrument[] = (syllabi || []).map(s => ({
         id: String(s.syllabus_id || s.id),

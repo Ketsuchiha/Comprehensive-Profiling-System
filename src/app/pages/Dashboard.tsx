@@ -25,10 +25,10 @@ export function Dashboard() {
     const fetchCounts = async () => {
       try {
         const [students, faculty, events, research] = await Promise.all([
-          api.get<any[]>('/students').catch(() => []),
-          api.get<any[]>('/faculty').catch(() => []),
-          api.get<any[]>('/events').catch(() => []),
-          api.get<any[]>('/research').catch(() => []),
+          api.get<any[]>('/students').catch((err) => { console.error('Failed to fetch students:', err); return []; }),
+          api.get<any[]>('/faculty').catch((err) => { console.error('Failed to fetch faculty:', err); return []; }),
+          api.get<any[]>('/events').catch((err) => { console.error('Failed to fetch events:', err); return []; }),
+          api.get<any[]>('/research').catch((err) => { console.error('Failed to fetch research:', err); return []; }),
         ]);
         setStudentCount(Array.isArray(students) ? students.length : 0);
         setFacultyCount(Array.isArray(faculty) ? faculty.length : 0);
