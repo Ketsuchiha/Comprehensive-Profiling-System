@@ -88,11 +88,29 @@ export function Events() {
       const reverseTypeMap: Record<string, string> = {
         seminar: "Seminar",
         conference: "Academic",
-        workshop: "Sports",
+        workshop: "Cultural",
         meeting: "Other",
       };
-      const startDateTime = formData.date ? `${formData.date}T09:00:00` : '';
-      const endDateTime = formData.date ? `${formData.date}T17:00:00` : '';
+      // Parse time range like "9:00 AM - 5:00 PM" into start/end components
+      let startTime = '09:00:00';
+      let endTime = '17:00:00';
+      if (formData.time) {
+        const parts = formData.time.split('-').map(p => p.trim());
+        const toISO = (t: string) => {
+          const match = t.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+          if (!match) return null;
+          let h = parseInt(match[1]);
+          const m = match[2];
+          const ampm = match[3].toUpperCase();
+          if (ampm === 'PM' && h < 12) h += 12;
+          if (ampm === 'AM' && h === 12) h = 0;
+          return `${String(h).padStart(2, '0')}:${m}:00`;
+        };
+        if (parts[0]) startTime = toISO(parts[0]) || startTime;
+        if (parts[1]) endTime = toISO(parts[1]) || endTime;
+      }
+      const startDateTime = formData.date ? `${formData.date}T${startTime}` : '';
+      const endDateTime = formData.date ? `${formData.date}T${endTime}` : '';
       await api.post('/events', {
         title: formData.title,
         description: formData.description,
