@@ -37,7 +37,7 @@ export function Dashboard() {
                 Welcome to CCS Profiling System
               </h1>
               <p className="text-xl text-gray-200">
-                College of Computing Studies - Comprehensive Management
+                College of Computing Studies - Comprehensive Profilling System
               </p>
             </div>
           </div>
