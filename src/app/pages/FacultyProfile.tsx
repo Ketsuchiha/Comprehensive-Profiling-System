@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Search, Plus, Edit, Trash2, Eye, X } from "lucide-react";
+import { api } from "../utils/api";
 
 interface Faculty {
   id: string;
@@ -11,47 +12,8 @@ interface Faculty {
   yearsOfTeaching: number;
 }
 
-const mockFaculty: Faculty[] = [
-  {
-    id: "1",
-    name: "Dr. Roberto Fernandez",
-    age: 45,
-    sex: "Male",
-    email: "r.fernandez@university.edu",
-    position: "Professor",
-    yearsOfTeaching: 20,
-  },
-  {
-    id: "2",
-    name: "Prof. Ana Reyes",
-    age: 38,
-    sex: "Female",
-    email: "a.reyes@university.edu",
-    position: "Associate Professor",
-    yearsOfTeaching: 12,
-  },
-  {
-    id: "3",
-    name: "Dr. Carlos Martinez",
-    age: 42,
-    sex: "Male",
-    email: "c.martinez@university.edu",
-    position: "Assistant Professor",
-    yearsOfTeaching: 8,
-  },
-  {
-    id: "4",
-    name: "Prof. Sofia Mendoza",
-    age: 35,
-    sex: "Female",
-    email: "s.mendoza@university.edu",
-    position: "Instructor",
-    yearsOfTeaching: 6,
-  },
-];
-
 export function FacultyProfile() {
-  const [faculty, setFaculty] = useState<Faculty[]>(mockFaculty);
+  const [faculty, setFaculty] = useState<Faculty[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedFaculty, setSelectedFaculty] = useState<Faculty | null>(null);
   const [showModal, setShowModal] = useState(false);
@@ -65,6 +27,44 @@ export function FacultyProfile() {
     yearsOfTeaching: 0,
   });
 
+  const fetchFaculty = async () => {
+    try {
+      const data = await api.get<any[]>('/faculty');
+      setFaculty(data.map(f => {
+        const name = `${f.first_name || ''} ${f.last_name || ''}`.trim();
+        let age = 0;
+        if (f.birth_date) {
+          const birth = new Date(f.birth_date);
+          const today = new Date();
+          age = today.getFullYear() - birth.getFullYear();
+          const m = today.getMonth() - birth.getMonth();
+          if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+        }
+        let yearsOfTeaching = 0;
+        if (f.date_hired) {
+          const hired = new Date(f.date_hired);
+          const today = new Date();
+          yearsOfTeaching = today.getFullYear() - hired.getFullYear();
+          const m = today.getMonth() - hired.getMonth();
+          if (m < 0 || (m === 0 && today.getDate() < hired.getDate())) yearsOfTeaching--;
+        }
+        return {
+          id: f.faculty_id,
+          name,
+          age,
+          sex: f.gender || '',
+          email: f.email || '',
+          position: f.rank || f.employment_status || '',
+          yearsOfTeaching,
+        };
+      }));
+    } catch (err) {
+      console.error('Failed to fetch faculty:', err);
+    }
+  };
+
+  useEffect(() => { fetchFaculty(); }, []);
+
   const filteredFaculty = faculty.filter((member) =>
     member.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     member.email.toLowerCase().includes(searchQuery.toLowerCase())
@@ -75,12 +75,22 @@ export function FacultyProfile() {
     setShowModal(true);
   };
 
-  const handleAddFaculty = () => {
-    const newFaculty: Faculty = {
-      ...formData,
-      id: Date.now().toString(),
-    };
-    setFaculty([...faculty, newFaculty]);
+  const handleAddFaculty = async () => {
+    try {
+      const nameParts = formData.name.trim().split(/\s+/);
+      const firstName = nameParts[0] || '';
+      const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+      await api.post('/faculty', {
+        first_name: firstName,
+        last_name: lastName,
+        gender: formData.sex,
+        email: formData.email,
+        rank: formData.position,
+      });
+      await fetchFaculty();
+    } catch (err) {
+      console.error('Failed to add faculty:', err);
+    }
     setShowAddModal(false);
     setFormData({
       name: "",
@@ -92,9 +102,14 @@ export function FacultyProfile() {
     });
   };
 
-  const handleDeleteFaculty = (id: string) => {
+  const handleDeleteFaculty = async (id: string) => {
     if (confirm("Are you sure you want to delete this faculty member?")) {
-      setFaculty(faculty.filter(f => f.id !== id));
+      try {
+        await api.delete(`/faculty/${id}`);
+        await fetchFaculty();
+      } catch (err) {
+        console.error('Failed to delete faculty:', err);
+      }
     }
   };
 
