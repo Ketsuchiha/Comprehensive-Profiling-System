@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const crypto = require('crypto');
 const pool = require('../config/db');
 
 // ─── FACULTY CRUD ───────────────────────────────────────────────
@@ -54,37 +55,98 @@ router.get('/:id', async (req, res) => {
   }
 });
 
+// GET /:id/dashboard - Teacher portal dashboard summary
+router.get('/:id/dashboard', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const [faculty] = await pool.query(
+      'SELECT faculty_id, first_name, last_name, specialization FROM faculty WHERE faculty_id = ?',
+      [id]
+    );
+    if (faculty.length === 0) return res.status(404).json({ error: 'Faculty not found' });
+
+    const [loadSummary] = await pool.query(
+      `SELECT COUNT(*) AS assigned_classes, COALESCE(SUM(teaching_units), 0) AS total_teaching_units
+       FROM faculty_load
+       WHERE faculty_id = ?`,
+      [id]
+    );
+
+    const [researchSummary] = await pool.query(
+      `SELECT COUNT(*) AS research_outputs
+       FROM faculty_research
+       WHERE faculty_id = ?`,
+      [id]
+    );
+
+    const [syllabusSummary] = await pool.query(
+      `SELECT COUNT(*) AS authored_syllabi
+       FROM syllabus
+       WHERE faculty_id = ?`,
+      [id]
+    );
+
+    res.json({
+      faculty: faculty[0],
+      summary: {
+        assigned_classes: loadSummary[0].assigned_classes,
+        total_teaching_units: loadSummary[0].total_teaching_units,
+        research_outputs: researchSummary[0].research_outputs,
+        authored_syllabi: syllabusSummary[0].authored_syllabi
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST / - Create faculty
 router.post('/', async (req, res) => {
   try {
     const {
       faculty_id, first_name, middle_name, last_name, birth_date, gender,
       email, contact_no, address, profile_photo, specialization,
-      employment
+      employment, rank
     } = req.body;
 
-    if (!faculty_id || !first_name || !last_name) {
-      return res.status(400).json({ error: 'faculty_id, first_name, and last_name are required' });
+    if (!first_name || !last_name || !email) {
+      return res.status(400).json({ error: 'first_name, last_name, and email are required' });
     }
+
+    let generatedFacultyId = faculty_id || `F${crypto.randomUUID().replace(/-/g, '').slice(0, 19)}`;
+    if (!faculty_id) {
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const [existing] = await pool.query('SELECT faculty_id FROM faculty WHERE faculty_id = ? LIMIT 1', [generatedFacultyId]);
+        if (existing.length === 0) break;
+        generatedFacultyId = `F${crypto.randomUUID().replace(/-/g, '').slice(0, 19)}`;
+      }
+    }
+    const resolvedRank = rank ?? employment?.rank ?? null;
 
     await pool.query(
       `INSERT INTO faculty (faculty_id, first_name, middle_name, last_name, birth_date, gender,
         email, contact_no, address, profile_photo, specialization)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [faculty_id, first_name, middle_name || null, last_name, birth_date || null, gender || null,
-       email || null, contact_no || null, address || null, profile_photo || null, specialization || null]
+      [generatedFacultyId, first_name, middle_name || null, last_name, birth_date || '2000-01-01', gender || 'Unknown',
+       email, contact_no || '', address || '', profile_photo || null, specialization || null]
     );
 
-    if (employment) {
+    if (employment || resolvedRank) {
       await pool.query(
         `INSERT INTO faculty_employment (faculty_id, employment_status, \`rank\`, department_id, date_hired, tenure_status)
          VALUES (?, ?, ?, ?, ?, ?)`,
-        [faculty_id, employment.employment_status || null, employment.rank || null,
-         employment.department_id || null, employment.date_hired || null, employment.tenure_status || null]
+        [
+          generatedFacultyId,
+          employment?.employment_status || null,
+          resolvedRank,
+          employment?.department_id || null,
+          employment?.date_hired || null,
+          employment?.tenure_status || null
+        ]
       );
     }
 
-    res.status(201).json({ message: 'Faculty created successfully', faculty_id });
+    res.status(201).json({ message: 'Faculty created successfully', faculty_id: generatedFacultyId });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') {
       return res.status(409).json({ error: 'Faculty ID or email already exists' });
@@ -317,6 +379,85 @@ router.get('/:id/load', async (req, res) => {
        WHERE fl.faculty_id = ?`, [req.params.id]
     );
     res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /:id/schedules - Teacher schedules
+router.get('/:id/schedules', async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT sc.*, s.subject_name, r.room_name, r.building
+       FROM schedules sc
+       LEFT JOIN subjects s ON sc.subject_code = s.subject_code
+       LEFT JOIN rooms r ON sc.room_id = r.room_id
+       WHERE sc.faculty_id = ?
+       ORDER BY sc.day_of_week, sc.start_time`,
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /:id/students - Students handled by teacher based on schedule section
+router.get('/:id/students', async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT DISTINCT s.student_id, s.first_name, s.middle_name, s.last_name, sa.program, sa.year_level, sa.section
+       FROM schedules sc
+       INNER JOIN student_academic sa ON sa.section = sc.section
+       INNER JOIN students s ON s.student_id = sa.student_id
+       WHERE sc.faculty_id = ?
+       ORDER BY s.last_name, s.first_name`,
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /:id/events - Faculty event records with attendance
+router.get('/:id/events', async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT e.*, ep.participation_id, ep.attendance
+       FROM event_participants ep
+       INNER JOIN events e ON ep.event_id = e.event_id
+       WHERE ep.participant_id = ? AND ep.participant_type = 'Faculty'
+       ORDER BY e.start_date DESC`,
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /:id/events/:eventId - Register faculty to event
+router.post('/:id/events/:eventId', async (req, res) => {
+  try {
+    const { id, eventId } = req.params;
+
+    const [existing] = await pool.query(
+      `SELECT participation_id FROM event_participants
+       WHERE event_id = ? AND participant_id = ? AND participant_type = 'Faculty'`,
+      [eventId, id]
+    );
+    if (existing.length > 0) {
+      return res.status(409).json({ error: 'Faculty is already registered for this event' });
+    }
+
+    const [result] = await pool.query(
+      `INSERT INTO event_participants (event_id, participant_id, participant_type, attendance)
+       VALUES (?, ?, 'Faculty', 'Registered')`,
+      [eventId, id]
+    );
+
+    res.status(201).json({ message: 'Faculty registered to event', participation_id: result.insertId });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
