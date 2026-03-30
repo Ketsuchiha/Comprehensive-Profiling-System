@@ -45,6 +45,56 @@ router.get('/:id', async (req, res) => {
   }
 });
 
+// GET /:id/dashboard - Student portal dashboard summary
+router.get('/:id/dashboard', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [student] = await pool.query(
+      `SELECT s.student_id, s.first_name, s.last_name, sa.program, sa.year_level, sa.section
+       FROM students s
+       LEFT JOIN student_academic sa ON s.student_id = sa.student_id
+       WHERE s.student_id = ?`,
+      [id]
+    );
+    if (student.length === 0) return res.status(404).json({ error: 'Student not found' });
+
+    const [gradeSummary] = await pool.query(
+      `SELECT COUNT(*) AS total_subjects, ROUND(AVG(final_grade), 2) AS average_final_grade
+       FROM student_grades
+       WHERE student_id = ?`,
+      [id]
+    );
+
+    const [scheduleSummary] = await pool.query(
+      `SELECT COUNT(*) AS total_schedules
+       FROM schedules sc
+       INNER JOIN student_academic sa ON sa.student_id = ?
+       WHERE sc.section = sa.section`,
+      [id]
+    );
+
+    const [eventSummary] = await pool.query(
+      `SELECT COUNT(*) AS registered_events
+       FROM event_participants
+       WHERE participant_id = ? AND participant_type = 'Student'`,
+      [id]
+    );
+
+    res.json({
+      student: student[0],
+      summary: {
+        total_subjects: gradeSummary[0].total_subjects,
+        average_final_grade: gradeSummary[0].average_final_grade,
+        total_schedules: scheduleSummary[0].total_schedules,
+        registered_events: eventSummary[0].registered_events
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST / - Create student
 router.post('/', async (req, res) => {
   try {
@@ -190,7 +240,14 @@ router.put('/:id/academic', async (req, res) => {
 // GET /:id/grades
 router.get('/:id/grades', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM student_grades WHERE student_id = ?', [req.params.id]);
+    const [rows] = await pool.query(
+      `SELECT sg.*, s.subject_name
+       FROM student_grades sg
+       LEFT JOIN subjects s ON sg.subject_code = s.subject_code
+       WHERE sg.student_id = ?
+       ORDER BY sg.academic_year DESC, sg.semester DESC, sg.subject_code`,
+      [req.params.id]
+    );
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -248,6 +305,70 @@ router.delete('/grades/:gradeId', async (req, res) => {
 });
 
 // ─── DOCUMENTS ──────────────────────────────────────────────────
+
+// GET /:id/schedules - Student class schedules based on section
+router.get('/:id/schedules', async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT sc.*, s.subject_name, f.first_name AS faculty_first_name, f.last_name AS faculty_last_name,
+         r.room_name, r.building
+       FROM student_academic sa
+       INNER JOIN schedules sc ON sc.section = sa.section
+       LEFT JOIN subjects s ON sc.subject_code = s.subject_code
+       LEFT JOIN faculty f ON sc.faculty_id = f.faculty_id
+       LEFT JOIN rooms r ON sc.room_id = r.room_id
+       WHERE sa.student_id = ?
+       ORDER BY sc.day_of_week, sc.start_time`,
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /:id/events - Student event records with attendance
+router.get('/:id/events', async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT e.*, ep.participation_id, ep.attendance
+       FROM event_participants ep
+       INNER JOIN events e ON ep.event_id = e.event_id
+       WHERE ep.participant_id = ? AND ep.participant_type = 'Student'
+       ORDER BY e.start_date DESC`,
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /:id/events/:eventId - Register student to event
+router.post('/:id/events/:eventId', async (req, res) => {
+  try {
+    const { id, eventId } = req.params;
+
+    const [existing] = await pool.query(
+      `SELECT participation_id FROM event_participants
+       WHERE event_id = ? AND participant_id = ? AND participant_type = 'Student'`,
+      [eventId, id]
+    );
+    if (existing.length > 0) {
+      return res.status(409).json({ error: 'Student is already registered for this event' });
+    }
+
+    const [result] = await pool.query(
+      `INSERT INTO event_participants (event_id, participant_id, participant_type, attendance)
+       VALUES (?, ?, 'Student', 'Registered')`,
+      [eventId, id]
+    );
+
+    res.status(201).json({ message: 'Student registered to event', participation_id: result.insertId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // GET /:id/documents
 router.get('/:id/documents', async (req, res) => {
