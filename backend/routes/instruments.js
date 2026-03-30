@@ -198,12 +198,12 @@ router.get('/lessons/:id', async (req, res) => {
 router.post('/lessons', async (req, res) => {
   try {
     const { topic_id, title, content_type, file_path, external_url, is_published } = req.body;
-    if (!topic_id || !title) return res.status(400).json({ error: 'topic_id and title are required' });
+    if (!title) return res.status(400).json({ error: 'title is required' });
 
     const [result] = await pool.query(
       `INSERT INTO lessons (topic_id, title, content_type, file_path, external_url, is_published, published_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [topic_id, title, content_type || null, file_path || null, external_url || null,
+      [topic_id || null, title, content_type || null, file_path || null, external_url || null,
        is_published || 0, is_published ? new Date() : null]
     );
 

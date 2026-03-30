@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const crypto = require('crypto');
 const pool = require('../config/db');
 
 // ─── FACULTY CRUD ───────────────────────────────────────────────
@@ -112,24 +113,32 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'first_name, last_name, and email are required' });
     }
 
-    const generatedFacultyId = faculty_id || `F${Date.now()}`.slice(0, 20);
+    let generatedFacultyId = faculty_id || `F${crypto.randomUUID().replace(/-/g, '').slice(0, 19)}`;
+    if (!faculty_id) {
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const [existing] = await pool.query('SELECT faculty_id FROM faculty WHERE faculty_id = ? LIMIT 1', [generatedFacultyId]);
+        if (existing.length === 0) break;
+        generatedFacultyId = `F${crypto.randomUUID().replace(/-/g, '').slice(0, 19)}`;
+      }
+    }
+    const resolvedRank = rank ?? employment?.rank ?? null;
 
     await pool.query(
       `INSERT INTO faculty (faculty_id, first_name, middle_name, last_name, birth_date, gender,
         email, contact_no, address, profile_photo, specialization)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [generatedFacultyId, first_name, middle_name || null, last_name, birth_date || '1970-01-01', gender || 'N/A',
-       email, contact_no || 'N/A', address || 'N/A', profile_photo || null, specialization || null]
+      [generatedFacultyId, first_name, middle_name || null, last_name, birth_date || '2000-01-01', gender || 'Unknown',
+       email, contact_no || '', address || '', profile_photo || null, specialization || null]
     );
 
-    if (employment || rank) {
+    if (employment || resolvedRank) {
       await pool.query(
         `INSERT INTO faculty_employment (faculty_id, employment_status, \`rank\`, department_id, date_hired, tenure_status)
          VALUES (?, ?, ?, ?, ?, ?)`,
         [
           generatedFacultyId,
           employment?.employment_status || null,
-          employment?.rank || rank || null,
+          resolvedRank,
           employment?.department_id || null,
           employment?.date_hired || null,
           employment?.tenure_status || null
