@@ -5,6 +5,8 @@ interface User {
   id: string;
   email: string;
   name: string;
+  role?: string;
+  refId?: string;
 }
 
 interface AuthContextType {
@@ -40,6 +42,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         id: String(data.user.user_id),
         email: data.user.username,
         name: data.user.username,
+        role: data.user.user_type,
+        refId: data.user.ref_id,
       };
       setUser(userData);
       localStorage.setItem('ccs_user', JSON.stringify(userData));
@@ -51,7 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const register = async (email: string, password: string, name: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      const data = await api.post<{ user: { user_id: number; username: string } }>('/auth/register', {
+      const data = await api.post<{ user: { user_id: number; username: string; user_type: string; ref_id: string } }>('/auth/register', {
         username: email,
         password,
         user_type: 'Admin',
@@ -60,6 +64,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         id: String(data.user.user_id),
         email: data.user.username,
         name: name,
+        role: data.user.user_type,
+        refId: data.user.ref_id,
       };
       setUser(userData);
       localStorage.setItem('ccs_user', JSON.stringify(userData));
