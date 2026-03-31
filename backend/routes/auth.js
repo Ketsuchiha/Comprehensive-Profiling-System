@@ -5,16 +5,18 @@ const crypto = require('crypto');
 const pool = require('../config/db');
 
 function normalizeUserType(userType) {
-  if (!userType) return 'Admin';
+  if (!userType) return null;
   const normalized = String(userType).trim().toLowerCase();
   if (normalized === 'teacher') return 'Faculty';
   if (normalized === 'faculty') return 'Faculty';
   if (normalized === 'student') return 'Student';
-  return 'Admin';
+  if (normalized === 'admin') return 'Admin';
+  return null;
 }
 
 function generateRefId(userType) {
-  const prefix = String(userType || 'Admin').slice(0, 3).toUpperCase();
+  const normalizedType = normalizeUserType(userType) || 'Admin';
+  const prefix = String(normalizedType).slice(0, 3).toUpperCase();
   const randomPart = crypto.randomBytes(2).toString('hex');
   return `${prefix}-${Date.now().toString(36)}-${randomPart}`.slice(0, 20);
 }
@@ -59,6 +61,9 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'username, password, and user_type are required' });
     }
     const resolvedUserType = normalizeUserType(user_type);
+    if (!resolvedUserType) {
+      return res.status(400).json({ error: 'user_type must be Admin, Teacher, Faculty, or Student' });
+    }
 
     const providedRefId = typeof ref_id === 'string' ? ref_id.trim() : '';
     const resolvedRefId = providedRefId || generateRefId(resolvedUserType);

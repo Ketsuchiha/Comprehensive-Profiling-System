@@ -30,6 +30,7 @@ Student backend routes are already available:
 - `GET /api/students/:id/dashboard`
 - `GET /api/students/:id`
 - `GET /api/students/:id/academic`
+- `GET /api/students/:id/courses`
 - `GET /api/students/:id/grades`
 - `GET /api/students/:id/schedules`
 - `GET /api/students/:id/events`
