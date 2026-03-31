@@ -4,8 +4,19 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const pool = require('../config/db');
 
+function normalizeUserType(userType) {
+  if (!userType) return null;
+  const normalized = String(userType).trim().toLowerCase();
+  if (normalized === 'teacher') return 'Faculty';
+  if (normalized === 'faculty') return 'Faculty';
+  if (normalized === 'student') return 'Student';
+  if (normalized === 'admin') return 'Admin';
+  return null;
+}
+
 function generateRefId(userType) {
-  const prefix = String(userType || 'Admin').slice(0, 3).toUpperCase();
+  const normalizedType = normalizeUserType(userType) || 'Admin';
+  const prefix = String(normalizedType).slice(0, 3).toUpperCase();
   const randomPart = crypto.randomBytes(2).toString('hex');
   return `${prefix}-${Date.now().toString(36)}-${randomPart}`.slice(0, 20);
 }
@@ -49,9 +60,13 @@ router.post('/register', async (req, res) => {
     if (!username || !password || !user_type) {
       return res.status(400).json({ error: 'username, password, and user_type are required' });
     }
+    const resolvedUserType = normalizeUserType(user_type);
+    if (!resolvedUserType) {
+      return res.status(400).json({ error: 'user_type must be Admin, Teacher, Faculty, or Student' });
+    }
 
     const providedRefId = typeof ref_id === 'string' ? ref_id.trim() : '';
-    const resolvedRefId = providedRefId || generateRefId(user_type);
+    const resolvedRefId = providedRefId || generateRefId(resolvedUserType);
     if (resolvedRefId.length > 20) {
       return res.status(400).json({ error: 'ref_id must be 20 characters or fewer' });
     }
@@ -61,12 +76,12 @@ router.post('/register', async (req, res) => {
 
     const [result] = await pool.query(
       'INSERT INTO users (ref_id, user_type, username, password_hash) VALUES (?, ?, ?, ?)',
-      [resolvedRefId, user_type, username, password_hash]
+      [resolvedRefId, resolvedUserType, username, password_hash]
     );
 
     res.status(201).json({
       message: 'User registered successfully',
-      user: { user_id: result.insertId, ref_id: resolvedRefId, user_type, username, is_active: 1 }
+      user: { user_id: result.insertId, ref_id: resolvedRefId, user_type: resolvedUserType, username, is_active: 1 }
     });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') {
