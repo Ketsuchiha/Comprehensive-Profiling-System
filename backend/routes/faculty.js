@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -9,6 +10,20 @@ function decodeBase64File(data) {
   if (!data || typeof data !== 'string') return null;
   const base64 = data.includes(',') ? data.split(',')[1] : data;
   return Buffer.from(base64, 'base64');
+}
+
+function normalizeDateInput(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
+}
+
+function generateDefaultPassword(lastName, birthDate) {
+  const initial = (typeof lastName === 'string' && lastName.trim())
+    ? lastName.trim().charAt(0).toUpperCase()
+    : 'X';
+  return `${initial}${birthDate}`;
 }
 
 async function hasFacultyCertificationTable() {
@@ -126,6 +141,11 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'first_name, last_name, and email are required' });
     }
 
+    const normalizedBirthDate = normalizeDateInput(birth_date);
+    if (!normalizedBirthDate) {
+      return res.status(400).json({ error: 'A valid birth_date is required' });
+    }
+
     let generatedFacultyId = faculty_id || `F${crypto.randomUUID().replace(/-/g, '').slice(0, 19)}`;
     if (!faculty_id) {
       for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -140,9 +160,30 @@ router.post('/', async (req, res) => {
       `INSERT INTO faculty (faculty_id, first_name, middle_name, last_name, birth_date, gender,
         email, contact_no, address, profile_photo, specialization)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [generatedFacultyId, first_name, middle_name || null, last_name, birth_date || '2000-01-01', gender || 'Unknown',
+      [generatedFacultyId, first_name, middle_name || null, last_name, normalizedBirthDate, gender || 'Unknown',
        email, contact_no || '', address || '', profile_photo || null, specialization || null]
     );
+
+    try {
+      const username = email.trim().toLowerCase();
+      const generatedPassword = generateDefaultPassword(last_name, normalizedBirthDate);
+      const salt = await bcrypt.genSalt(10);
+      const password_hash = await bcrypt.hash(generatedPassword, salt);
+
+      await pool.query(
+        `INSERT INTO users (ref_id, user_type, username, password_hash)
+         VALUES (?, 'Faculty', ?, ?)
+         ON DUPLICATE KEY UPDATE
+           user_type = VALUES(user_type),
+           username = VALUES(username),
+           password_hash = VALUES(password_hash),
+           is_active = 1`,
+        [generatedFacultyId, username, password_hash]
+      );
+    } catch (userErr) {
+      await pool.query('DELETE FROM faculty WHERE faculty_id = ?', [generatedFacultyId]);
+      throw userErr;
+    }
 
     if (employment || resolvedRank) {
       await pool.query(

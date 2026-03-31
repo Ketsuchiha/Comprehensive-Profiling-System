@@ -20,6 +20,8 @@ interface Student {
   address: string;
   emergencyContact: string;
   emergencyContactNumber: string;
+  nationality: string;
+  religion: string;
 }
 
 export function StudentProfile() {
@@ -46,6 +48,8 @@ export function StudentProfile() {
     address: "",
     emergencyContact: "",
     emergencyContactNumber: "",
+    nationality: "",
+    religion: "",
   });
 
   const fetchStudents = async () => {
@@ -69,6 +73,8 @@ export function StudentProfile() {
         address: s.address || '',
         emergencyContact: s.emergency_contact || '',
         emergencyContactNumber: s.emergency_contact_num || '',
+        nationality: s.nationality || '',
+        religion: s.religion || '',
       })));
     } catch (err) {
       console.error('Failed to fetch students:', err);
@@ -114,6 +120,8 @@ export function StudentProfile() {
         address: formData.address,
         emergency_contact: formData.emergencyContact,
         emergency_contact_num: formData.emergencyContactNumber,
+        nationality: formData.nationality,
+        religion: formData.religion,
         academic: {
           program: formData.program || null,
           year_level: formData.yearLevel ? Number(formData.yearLevel) : null,
@@ -144,6 +152,8 @@ export function StudentProfile() {
       address: "",
       emergencyContact: "",
       emergencyContactNumber: "",
+      nationality: "",
+      religion: "",
     });
   };
 
@@ -351,6 +361,14 @@ export function StudentProfile() {
                 <label className="text-sm font-semibold text-gray-600">Emergency Contact Number</label>
                 <p className="text-gray-900 mt-1">{selectedStudent.emergencyContactNumber}</p>
               </div>
+              <div>
+                <label className="text-sm font-semibold text-gray-600">Nationality</label>
+                <p className="text-gray-900 mt-1">{selectedStudent.nationality || '-'}</p>
+              </div>
+              <div>
+                <label className="text-sm font-semibold text-gray-600">Religion</label>
+                <p className="text-gray-900 mt-1">{selectedStudent.religion || '-'}</p>
+              </div>
             </div>
           </div>
         </div>
@@ -554,6 +572,29 @@ export function StudentProfile() {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
                   placeholder="+63 912 345 6789"
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Nationality</label>
+                <input
+                  type="text"
+                  value={formData.nationality}
+                  onChange={(e) => handleInputChange("nationality", e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  placeholder="e.g., Filipino"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Religion</label>
+                <input
+                  type="text"
+                  value={formData.religion}
+                  onChange={(e) => handleInputChange("religion", e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  placeholder="e.g., Roman Catholic"
+                />
+              </div>
+              <div className="col-span-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-800">
+                Auto-generated password: {(formData.lastName?.trim()?.[0] || 'X').toUpperCase()}{formData.dateOfBirth || 'YYYY-MM-DD'}
               </div>
               <div className="col-span-2 flex gap-3 mt-4">
                 <button
