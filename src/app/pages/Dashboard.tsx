@@ -1,17 +1,12 @@
+import { useState, useEffect } from "react";
 import { 
   GraduationCap, 
   Users, 
   Calendar, 
   BookOpen 
 } from "lucide-react";
+import { api } from "../utils/api";
 import buildingImage from "../../assets/b65a68daf197ee46f7b02d7da02ee101a668ac79.png";
-
-const stats = [
-  { name: "Total Students", value: "1,234", icon: GraduationCap, color: "bg-blue-500" },
-  { name: "Faculty Members", value: "87", icon: Users, color: "bg-green-500" },
-  { name: "Upcoming Events", value: "12", icon: Calendar, color: "bg-purple-500" },
-  { name: "Research Projects", value: "45", icon: BookOpen, color: "bg-orange-500" },
-];
 
 const recentActivities = [
   { title: "New student enrolled", time: "2 hours ago", type: "student" },
@@ -21,6 +16,38 @@ const recentActivities = [
 ];
 
 export function Dashboard() {
+  const [studentCount, setStudentCount] = useState(0);
+  const [facultyCount, setFacultyCount] = useState(0);
+  const [eventCount, setEventCount] = useState(0);
+  const [researchCount, setResearchCount] = useState(0);
+
+  useEffect(() => {
+    const fetchCounts = async () => {
+      try {
+        const [students, faculty, events, research] = await Promise.all([
+          api.get<any[]>('/students').catch((err) => { console.error('Failed to fetch students:', err); return []; }),
+          api.get<any[]>('/faculty').catch((err) => { console.error('Failed to fetch faculty:', err); return []; }),
+          api.get<any[]>('/events').catch((err) => { console.error('Failed to fetch events:', err); return []; }),
+          api.get<any[]>('/research').catch((err) => { console.error('Failed to fetch research:', err); return []; }),
+        ]);
+        setStudentCount(Array.isArray(students) ? students.length : 0);
+        setFacultyCount(Array.isArray(faculty) ? faculty.length : 0);
+        setEventCount(Array.isArray(events) ? events.length : 0);
+        setResearchCount(Array.isArray(research) ? research.length : 0);
+      } catch (err) {
+        console.error('Failed to fetch dashboard counts:', err);
+      }
+    };
+    fetchCounts();
+  }, []);
+
+  const stats = [
+    { name: "Total Students", value: studentCount.toLocaleString(), icon: GraduationCap, color: "bg-blue-500" },
+    { name: "Faculty Members", value: facultyCount.toLocaleString(), icon: Users, color: "bg-green-500" },
+    { name: "Upcoming Events", value: eventCount.toLocaleString(), icon: Calendar, color: "bg-purple-500" },
+    { name: "Research Projects", value: researchCount.toLocaleString(), icon: BookOpen, color: "bg-orange-500" },
+  ];
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header with background image */}
