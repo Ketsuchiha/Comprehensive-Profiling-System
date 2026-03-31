@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { FileText, Download, Upload, Plus, Search, X } from "lucide-react";
 import { api } from "../utils/api";
 
@@ -10,6 +10,7 @@ interface Instrument {
   instructor: string;
   uploadDate: string;
   fileSize: string;
+  fileUrl: string;
 }
 
 const typeColors = {
@@ -26,9 +27,15 @@ const typeIcons = {
 
 export function Instruments() {
   const [instruments, setInstruments] = useState<Instrument[]>([]);
+  const [subjects, setSubjects] = useState<Array<{ subject_code: string; subject_name: string }>>([]);
+  const [facultyOptions, setFacultyOptions] = useState<Array<{ faculty_id: string; first_name: string; last_name: string; specialization?: string }>>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedType, setSelectedType] = useState<string>("all");
   const [showAddModal, setShowAddModal] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+  const [selectedFileName, setSelectedFileName] = useState('');
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [formData, setFormData] = useState<Omit<Instrument, "id">>({
     title: "",
     type: "syllabus",
@@ -40,6 +47,14 @@ export function Instruments() {
 
   const fetchInstruments = async () => {
     try {
+      const backendBaseUrl = `${window.location.protocol}//${window.location.hostname}:5000`;
+      const resolveFileUrl = (value: string | null | undefined) => {
+        if (!value) return '';
+        if (value.startsWith('http://') || value.startsWith('https://')) return value;
+        if (value.startsWith('/uploads/')) return `${backendBaseUrl}${value}`;
+        return '';
+      };
+
       const [syllabi, lessons] = await Promise.all([
         api.get<any[]>('/instruments/syllabus').catch((err) => { console.error('Failed to fetch syllabi:', err); return []; }),
         api.get<any[]>('/instruments/lessons').catch((err) => { console.error('Failed to fetch lessons:', err); return []; }),
@@ -52,6 +67,7 @@ export function Instruments() {
         instructor: `${s.faculty_first_name || ''} ${s.faculty_last_name || ''}`.trim(),
         uploadDate: s.created_at ? s.created_at.split('T')[0] : '',
         fileSize: 'N/A',
+        fileUrl: resolveFileUrl(s.references_biblio),
       }));
       const lessonItems: Instrument[] = (lessons || []).map(l => ({
         id: String(l.lesson_id || l.id),
@@ -61,6 +77,7 @@ export function Instruments() {
         instructor: `${l.faculty_first_name || ''} ${l.faculty_last_name || ''}`.trim(),
         uploadDate: l.created_at ? l.created_at.split('T')[0] : '',
         fileSize: 'N/A',
+        fileUrl: resolveFileUrl(l.file_path || l.external_url),
       }));
       setInstruments([...syllabusItems, ...lessonItems]);
     } catch (err) {
@@ -70,6 +87,16 @@ export function Instruments() {
 
   useEffect(() => { fetchInstruments(); }, []);
 
+  useEffect(() => {
+    api.get<Array<{ subject_code: string; subject_name: string }>>('/subjects')
+      .then(setSubjects)
+      .catch((err) => console.error('Failed to fetch subjects:', err));
+
+    api.get<Array<{ faculty_id: string; first_name: string; last_name: string; specialization?: string }>>('/faculty')
+      .then(setFacultyOptions)
+      .catch((err) => console.error('Failed to fetch faculty:', err));
+  }, []);
+
   const filteredInstruments = instruments.filter((item) => {
     const matchesSearch = item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       item.courseCode.toLowerCase().includes(searchQuery.toLowerCase());
@@ -78,27 +105,120 @@ export function Instruments() {
   });
 
   const handleAddInstrument = async () => {
+    setSubmitError('');
+    const normalizedCourseCode = formData.courseCode.trim().toUpperCase();
+    if (!normalizedCourseCode) {
+      setSubmitError('Course code is required');
+      return;
+    }
+
     try {
       const endpoint = formData.type === 'syllabus'
         ? '/instruments/syllabus'
         : '/instruments/lessons';
+
+      const selectedSubject = subjects.find((subject) => subject.subject_code === normalizedCourseCode);
+
+      const payload = formData.type === 'syllabus'
+        ? {
+          title: formData.title,
+          subject_code: normalizedCourseCode,
+          subject_name: selectedSubject?.subject_name || formData.title,
+          faculty_id: formData.instructor || undefined,
+          course_description: selectedFileName || null,
+          file_name: selectedFile?.name,
+          mime_type: selectedFile?.type || undefined,
+          file_data_base64: selectedFile
+            ? await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(String(reader.result || ''));
+              reader.onerror = () => reject(new Error('Failed to read selected file'));
+              reader.readAsDataURL(selectedFile);
+            })
+            : undefined,
+        }
+        : {
+          title: formData.title,
+          subject_code: normalizedCourseCode,
+          file_path: selectedFileName || null,
+          file_name: selectedFile?.name,
+          mime_type: selectedFile?.type || undefined,
+          file_data_base64: selectedFile
+            ? await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(String(reader.result || ''));
+              reader.onerror = () => reject(new Error('Failed to read selected file'));
+              reader.readAsDataURL(selectedFile);
+            })
+            : undefined,
+        };
+
       await api.post(endpoint, {
-        title: formData.title,
-        subject_code: formData.courseCode,
+        ...payload,
       });
       await fetchInstruments();
+      setShowAddModal(false);
+      setFormData({
+        title: "",
+        type: "syllabus",
+        courseCode: "",
+        instructor: "",
+        uploadDate: new Date().toISOString().split('T')[0],
+        fileSize: "",
+      });
+      setSelectedFileName('');
+      setSelectedFile(null);
     } catch (err) {
       console.error('Failed to add instrument:', err);
+      setSubmitError(err instanceof Error ? err.message : 'Failed to add instrument');
     }
-    setShowAddModal(false);
-    setFormData({
-      title: "",
-      type: "syllabus",
-      courseCode: "",
-      instructor: "",
-      uploadDate: new Date().toISOString().split('T')[0],
-      fileSize: "",
-    });
+  };
+
+  const handleFileSelection = (file: File | null) => {
+    if (!file) {
+      setSelectedFileName('');
+      setSelectedFile(null);
+      return;
+    }
+
+    const maxFileSizeBytes = 10 * 1024 * 1024;
+    if (file.size > maxFileSizeBytes) {
+      setSubmitError('File is too large. Maximum supported size is 10 MB.');
+      setSelectedFileName('');
+      setSelectedFile(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      return;
+    }
+
+    setSubmitError('');
+    setSelectedFile(file);
+    setSelectedFileName(file.name);
+    const sizeMb = file.size / (1024 * 1024);
+    setFormData((prev) => ({ ...prev, fileSize: `${sizeMb.toFixed(2)} MB` }));
+  };
+
+  const handleViewDocument = (fileUrl: string) => {
+    if (!fileUrl) {
+      setSubmitError('No uploaded file is attached to this item.');
+      return;
+    }
+
+    const isOfficeDoc = /\.(doc|docx)(\?|$)/i.test(fileUrl);
+    if (isOfficeDoc) {
+      const link = document.createElement('a');
+      link.href = fileUrl;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.download = '';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      return;
+    }
+
+    window.open(fileUrl, '_blank', 'noopener,noreferrer');
   };
 
   const handleInputChange = (field: keyof Omit<Instrument, "id">, value: string) => {
@@ -202,7 +322,18 @@ export function Instruments() {
                         </span>
                       </div>
                       <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                        {item.title}
+                        {item.fileUrl ? (
+                          <button
+                            type="button"
+                            onClick={() => handleViewDocument(item.fileUrl)}
+                            className="text-left text-orange-700 hover:text-orange-800 hover:underline"
+                            title="Open uploaded file"
+                          >
+                            {item.title}
+                          </button>
+                        ) : (
+                          item.title
+                        )}
                       </h3>
                       <div className="flex flex-wrap gap-4 text-sm text-gray-600">
                         <div className="flex items-center gap-1">
@@ -213,16 +344,36 @@ export function Instruments() {
                           <span>Instructor: {item.instructor}</span>
                         </div>
                         <div>
-                          <span>Uploaded: {item.uploadDate}</span>
+                          {item.fileUrl ? (
+                            <button
+                              type="button"
+                              onClick={() => handleViewDocument(item.fileUrl)}
+                              className="text-blue-700 hover:text-blue-800 hover:underline"
+                              title="View uploaded file"
+                            >
+                              Uploaded: {item.uploadDate}
+                            </button>
+                          ) : (
+                            <span>Uploaded: {item.uploadDate} (No file)</span>
+                          )}
                         </div>
                       </div>
                     </div>
                   </div>
                   <div className="flex gap-2">
-                    <button className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                    <button
+                      onClick={() => handleViewDocument(item.fileUrl)}
+                      className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                      title="View uploaded file"
+                    >
                       <Download className="w-5 h-5" />
                     </button>
-                    <button className="p-2 text-orange-600 hover:bg-orange-50 rounded-lg transition-colors">
+                    <button
+                      type="button"
+                      onClick={() => handleViewDocument(item.fileUrl)}
+                      className="p-2 text-orange-600 hover:bg-orange-50 rounded-lg transition-colors"
+                      title="Open uploaded file"
+                    >
                       <Plus className="w-5 h-5" />
                     </button>
                   </div>
@@ -283,6 +434,11 @@ export function Instruments() {
                 <X className="w-6 h-6" />
               </button>
             </div>
+            {submitError && (
+              <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {submitError}
+              </div>
+            )}
             <form onSubmit={(e) => { e.preventDefault(); handleAddInstrument(); }} className="space-y-4">
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Document Title *</label>
@@ -313,24 +469,37 @@ export function Instruments() {
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Course Code *</label>
                   <input
                     type="text"
+                    list="instrument-course-code-options"
                     required
                     value={formData.courseCode}
                     onChange={(e) => handleInputChange("courseCode", e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                    placeholder="e.g., CS101"
+                    placeholder="Type or select course code"
                   />
+                  <datalist id="instrument-course-code-options">
+                    {subjects.map((subject) => (
+                      <option key={subject.subject_code} value={subject.subject_code}>
+                        {subject.subject_code} - {subject.subject_name}
+                      </option>
+                    ))}
+                  </datalist>
                 </div>
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Instructor *</label>
-                <input
-                  type="text"
+                <select
                   required
                   value={formData.instructor}
                   onChange={(e) => handleInputChange("instructor", e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  placeholder="e.g., Prof. Ana Reyes"
-                />
+                >
+                  <option value="">Select instructor</option>
+                  {facultyOptions.map((faculty) => (
+                    <option key={faculty.faculty_id} value={faculty.faculty_id}>
+                      {faculty.first_name} {faculty.last_name} ({faculty.specialization || 'No expertise set'})
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">File Size *</label>
@@ -345,11 +514,24 @@ export function Instruments() {
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Upload File *</label>
-                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-orange-500 transition-colors cursor-pointer">
+                <div
+                  className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-orange-500 transition-colors cursor-pointer"
+                  onClick={() => fileInputRef.current?.click()}
+                >
                   <Upload className="w-8 h-8 mx-auto text-gray-400 mb-2" />
                   <p className="text-sm text-gray-600">Click to upload or drag and drop</p>
                   <p className="text-xs text-gray-500 mt-1">PDF, DOC, DOCX (MAX. 10MB)</p>
+                  {selectedFileName && (
+                    <p className="text-xs text-orange-700 mt-2">Selected: {selectedFileName}</p>
+                  )}
                 </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.doc,.docx"
+                  className="hidden"
+                  onChange={(e) => handleFileSelection(e.target.files?.[0] || null)}
+                />
               </div>
               <div className="flex gap-3 mt-6">
                 <button

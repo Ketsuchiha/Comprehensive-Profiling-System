@@ -32,12 +32,12 @@ export function Register() {
 
     setIsLoading(true);
 
-    const success = await register(email, password, name);
-    
-    if (success) {
+    const result = await register(email, password, name);
+
+    if (result.success) {
       navigate('/');
     } else {
-      setError('Email already exists');
+      setError(result.error || 'Registration failed');
     }
     
     setIsLoading(false);

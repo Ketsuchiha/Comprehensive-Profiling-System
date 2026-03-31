@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, ReactNode } from 'react';
 import { api } from '../utils/api';
 
 interface User {
@@ -10,7 +10,7 @@ interface User {
 interface AuthContextType {
   user: User | null;
   login: (email: string, password: string) => Promise<boolean>;
-  register: (email: string, password: string, name: string) => Promise<boolean>;
+  register: (email: string, password: string, name: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   isAuthenticated: boolean;
 }
@@ -18,14 +18,17 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-
-  useEffect(() => {
+  const [user, setUser] = useState<User | null>(() => {
     const storedUser = localStorage.getItem('ccs_user');
-    if (storedUser) {
-      setUser(JSON.parse(storedUser));
+    if (!storedUser) return null;
+
+    try {
+      return JSON.parse(storedUser) as User;
+    } catch {
+      localStorage.removeItem('ccs_user');
+      return null;
     }
-  }, []);
+  });
 
   const login = async (email: string, password: string): Promise<boolean> => {
     try {
@@ -46,13 +49,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const register = async (email: string, password: string, name: string): Promise<boolean> => {
+  const register = async (email: string, password: string, name: string): Promise<{ success: boolean; error?: string }> => {
     try {
       const data = await api.post<{ user: { user_id: number; username: string } }>('/auth/register', {
         username: email,
         password,
         user_type: 'Admin',
-        ref_id: name,
       });
       const userData: User = {
         id: String(data.user.user_id),
@@ -61,9 +63,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       };
       setUser(userData);
       localStorage.setItem('ccs_user', JSON.stringify(userData));
-      return true;
-    } catch {
-      return false;
+      return { success: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Registration failed';
+      return { success: false, error: message };
     }
   };
 

@@ -14,12 +14,29 @@ interface Schedule {
   section: string;
 }
 
+interface FacultyOption {
+  faculty_id: string;
+  first_name: string;
+  last_name: string;
+  specialization?: string;
+}
+
+interface RoomOption {
+  room_id: number;
+  room_name: string;
+  building?: string;
+}
+
 const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 export function Scheduling() {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [subjects, setSubjects] = useState<Array<{ subject_code: string; subject_name: string }>>([]);
+  const [facultyOptions, setFacultyOptions] = useState<FacultyOption[]>([]);
+  const [roomOptions, setRoomOptions] = useState<RoomOption[]>([]);
   const [selectedDay, setSelectedDay] = useState<string>("all");
   const [showAddModal, setShowAddModal] = useState(false);
+  const [submitError, setSubmitError] = useState('');
   const [formData, setFormData] = useState<Omit<Schedule, "id">>({
     courseCode: "",
     courseName: "",
@@ -50,37 +67,112 @@ export function Scheduling() {
     }
   };
 
-  useEffect(() => { fetchSchedules(); }, []);
+  const fetchSubjects = async () => {
+    try {
+      const data = await api.get<Array<{ subject_code: string; subject_name: string }>>('/subjects');
+      setSubjects(data);
+    } catch (err) {
+      console.error('Failed to fetch subjects:', err);
+    }
+  };
+
+  const fetchFaculty = async () => {
+    try {
+      const data = await api.get<FacultyOption[]>('/faculty');
+      setFacultyOptions(data);
+    } catch (err) {
+      console.error('Failed to fetch faculty:', err);
+    }
+  };
+
+  const fetchRooms = async () => {
+    try {
+      const data = await api.get<RoomOption[]>('/rooms');
+      setRoomOptions(data);
+    } catch (err) {
+      console.error('Failed to fetch rooms:', err);
+    }
+  };
+
+  const normalizeText = (value: string) => value.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+
+  const scoreFacultyForSubject = (subjectName: string, specialization?: string) => {
+    if (!specialization) return 0;
+
+    const subject = normalizeText(subjectName);
+    const expertise = normalizeText(specialization);
+
+    const networkKeywords = ['network', 'networking', 'cybersecurity', 'security', 'hacking', 'ethical hacking', 'penetration'];
+    const appKeywords = ['app', 'application', 'software', 'web', 'mobile', 'programming', 'development'];
+    const introKeywords = ['intro', 'introduction', 'fundamentals', 'basic', 'computing'];
+
+    const hasAny = (text: string, terms: string[]) => terms.some((term) => text.includes(term));
+
+    if (hasAny(subject, networkKeywords)) {
+      return hasAny(expertise, networkKeywords) ? 3 : 0;
+    }
+    if (hasAny(subject, appKeywords)) {
+      return hasAny(expertise, appKeywords) ? 3 : 0;
+    }
+    if (hasAny(subject, introKeywords)) {
+      return hasAny(expertise, introKeywords) ? 2 : 0;
+    }
+
+    return subject.split(' ').some((token) => token.length > 3 && expertise.includes(token)) ? 1 : 0;
+  };
+
+  useEffect(() => {
+    fetchSchedules();
+    fetchSubjects();
+    fetchFaculty();
+    fetchRooms();
+  }, []);
 
   const filteredSchedules = selectedDay === "all"
     ? schedules
     : schedules.filter((schedule) => schedule.day === selectedDay);
 
   const handleAddSchedule = async () => {
+    setSubmitError('');
     try {
       await api.post('/schedules', {
         subject_code: formData.courseCode,
         section: formData.section,
+        faculty_id: formData.instructor || undefined,
+        room_id: formData.room ? Number(formData.room) : undefined,
         day_of_week: formData.day,
         start_time: formData.timeStart,
         end_time: formData.timeEnd,
       });
       await fetchSchedules();
+      setShowAddModal(false);
+      setFormData({
+        courseCode: "",
+        courseName: "",
+        instructor: "",
+        room: "",
+        day: "Monday",
+        timeStart: "",
+        timeEnd: "",
+        section: "",
+      });
     } catch (err) {
       console.error('Failed to add schedule:', err);
+      setSubmitError(err instanceof Error ? err.message : 'Failed to add schedule');
     }
-    setShowAddModal(false);
-    setFormData({
-      courseCode: "",
-      courseName: "",
-      instructor: "",
-      room: "",
-      day: "Monday",
-      timeStart: "",
-      timeEnd: "",
-      section: "",
-    });
   };
+
+  const selectedSubjectName = subjects.find((subject) => subject.subject_code === formData.courseCode)?.subject_name || '';
+  const recommendedFaculty = selectedSubjectName
+    ? facultyOptions
+      .map((faculty) => ({ faculty, score: scoreFacultyForSubject(selectedSubjectName, faculty.specialization) }))
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .map((item) => item.faculty)
+    : [];
+
+  const recommendedFacultyIds = new Set(recommendedFaculty.map((faculty) => faculty.faculty_id));
+  const otherFaculty = facultyOptions.filter((faculty) => !recommendedFacultyIds.has(faculty.faculty_id));
 
   const handleInputChange = (field: keyof Omit<Schedule, "id">, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -224,17 +316,35 @@ export function Scheduling() {
                 <X className="w-6 h-6" />
               </button>
             </div>
+            {submitError && (
+              <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {submitError}
+              </div>
+            )}
             <form onSubmit={(e) => { e.preventDefault(); handleAddSchedule(); }} className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Course Code *</label>
-                <input
-                  type="text"
+                <select
                   required
                   value={formData.courseCode}
-                  onChange={(e) => handleInputChange("courseCode", e.target.value)}
+                  onChange={(e) => {
+                    const selectedCode = e.target.value;
+                    const selectedSubject = subjects.find((s) => s.subject_code === selectedCode);
+                    setFormData((prev) => ({
+                      ...prev,
+                      courseCode: selectedCode,
+                      courseName: selectedSubject?.subject_name || prev.courseName,
+                    }));
+                  }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  placeholder="e.g., CS101"
-                />
+                >
+                  <option value="">Select subject code</option>
+                  {subjects.map((subject) => (
+                    <option key={subject.subject_code} value={subject.subject_code}>
+                      {subject.subject_code} - {subject.subject_name}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Section *</label>
@@ -251,7 +361,6 @@ export function Scheduling() {
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Course Name *</label>
                 <input
                   type="text"
-                  required
                   value={formData.courseName}
                   onChange={(e) => handleInputChange("courseName", e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
@@ -260,25 +369,47 @@ export function Scheduling() {
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Instructor *</label>
-                <input
-                  type="text"
-                  required
+                <select
                   value={formData.instructor}
                   onChange={(e) => handleInputChange("instructor", e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  placeholder="e.g., Prof. Ana Reyes"
-                />
+                >
+                  <option value="">Select instructor</option>
+                  {recommendedFaculty.length > 0 && (
+                    <optgroup label="Recommended by expertise">
+                      {recommendedFaculty.map((faculty) => (
+                        <option key={faculty.faculty_id} value={faculty.faculty_id}>
+                          {faculty.first_name} {faculty.last_name} ({faculty.specialization || 'No expertise set'})
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  <optgroup label="Other instructors">
+                    {otherFaculty.map((faculty) => (
+                      <option key={faculty.faculty_id} value={faculty.faculty_id}>
+                        {faculty.first_name} {faculty.last_name} ({faculty.specialization || 'No expertise set'})
+                      </option>
+                    ))}
+                  </optgroup>
+                </select>
+                {selectedSubjectName && recommendedFaculty.length === 0 && (
+                  <p className="mt-1 text-xs text-amber-700">No direct expertise match found for {selectedSubjectName}. Please assign manually.</p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Room *</label>
-                <input
-                  type="text"
-                  required
+                <select
                   value={formData.room}
                   onChange={(e) => handleInputChange("room", e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  placeholder="e.g., Lab 301"
-                />
+                >
+                  <option value="">Select room</option>
+                  {roomOptions.map((room) => (
+                    <option key={room.room_id} value={String(room.room_id)}>
+                      {room.room_name}{room.building ? ` (${room.building})` : ''}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Day *</label>
@@ -298,23 +429,21 @@ export function Scheduling() {
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Start Time *</label>
                 <input
-                  type="text"
+                  type="time"
                   required
                   value={formData.timeStart}
                   onChange={(e) => handleInputChange("timeStart", e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  placeholder="e.g., 8:00 AM"
                 />
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">End Time *</label>
                 <input
-                  type="text"
+                  type="time"
                   required
                   value={formData.timeEnd}
                   onChange={(e) => handleInputChange("timeEnd", e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  placeholder="e.g., 10:00 AM"
                 />
               </div>
               <div className="col-span-2 flex gap-3 mt-4">

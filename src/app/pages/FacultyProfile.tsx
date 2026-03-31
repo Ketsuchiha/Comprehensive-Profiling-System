@@ -9,6 +9,22 @@ interface Faculty {
   sex: string;
   email: string;
   position: string;
+  expertise: string;
+  yearsOfTeaching: number;
+}
+
+interface ExpertiseCertificateInput {
+  id: number;
+  expertise: string;
+  file: File | null;
+}
+
+interface AddFacultyForm {
+  name: string;
+  age: number;
+  sex: string;
+  email: string;
+  position: string;
   yearsOfTeaching: number;
 }
 
@@ -18,7 +34,11 @@ export function FacultyProfile() {
   const [selectedFaculty, setSelectedFaculty] = useState<Faculty | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [formData, setFormData] = useState<Omit<Faculty, "id">>({
+  const [submitError, setSubmitError] = useState('');
+  const [expertiseInputs, setExpertiseInputs] = useState<ExpertiseCertificateInput[]>([
+    { id: 1, expertise: '', file: null },
+  ]);
+  const [formData, setFormData] = useState<AddFacultyForm>({
     name: "",
     age: 0,
     sex: "Male",
@@ -55,6 +75,7 @@ export function FacultyProfile() {
           sex: f.gender || '',
           email: f.email || '',
           position: f.rank || f.employment_status || '',
+          expertise: f.specialization || '',
           yearsOfTeaching,
         };
       }));
@@ -76,30 +97,77 @@ export function FacultyProfile() {
   };
 
   const handleAddFaculty = async () => {
+    setSubmitError('');
+    const trimmedName = formData.name.trim();
+    const nameParts = trimmedName.split(/\s+/).filter(Boolean);
+    if (nameParts.length < 2) {
+      setSubmitError('Please enter both first and last name.');
+      return;
+    }
+
+    const preparedExpertise = expertiseInputs
+      .map((entry) => ({
+        id: entry.id,
+        expertise: entry.expertise.trim(),
+        file: entry.file,
+      }))
+      .filter((entry) => entry.expertise.length > 0 || entry.file);
+
+    const hasIncompleteRow = preparedExpertise.some((entry) => !entry.expertise || !entry.file);
+    if (hasIncompleteRow) {
+      setSubmitError('Each expertise entry must include both an expertise label and a certificate file.');
+      return;
+    }
+
+    if (preparedExpertise.length === 0) {
+      setSubmitError('Add at least one expertise certificate.');
+      return;
+    }
+
     try {
-      const nameParts = formData.name.trim().split(/\s+/);
       const firstName = nameParts[0] || '';
       const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
-      await api.post('/faculty', {
+      const specialization = preparedExpertise.map((entry) => entry.expertise).join(', ').slice(0, 150);
+      const created = await api.post<{ faculty_id: string; warning?: string }>('/faculty', {
         first_name: firstName,
         last_name: lastName,
         gender: formData.sex,
         email: formData.email,
         rank: formData.position,
+        specialization: specialization || null,
       });
+
+      for (const entry of preparedExpertise) {
+        const fileDataBase64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = () => reject(new Error(`Failed to read certificate file for ${entry.expertise}`));
+          reader.readAsDataURL(entry.file as File);
+        });
+
+        await api.post(`/faculty/${created.faculty_id}/certifications`, {
+          expertise: entry.expertise,
+          file_name: (entry.file as File).name,
+          file_data_base64: fileDataBase64,
+          mime_type: (entry.file as File).type || 'application/pdf',
+        });
+      }
+
       await fetchFaculty();
+      setShowAddModal(false);
+      setFormData({
+        name: "",
+        age: 0,
+        sex: "Male",
+        email: "",
+        position: "Instructor",
+        yearsOfTeaching: 0,
+      });
+      setExpertiseInputs([{ id: 1, expertise: '', file: null }]);
     } catch (err) {
       console.error('Failed to add faculty:', err);
+      setSubmitError(err instanceof Error ? err.message : 'Failed to add faculty');
     }
-    setShowAddModal(false);
-    setFormData({
-      name: "",
-      age: 0,
-      sex: "Male",
-      email: "",
-      position: "Instructor",
-      yearsOfTeaching: 0,
-    });
   };
 
   const handleDeleteFaculty = async (id: string) => {
@@ -113,8 +181,23 @@ export function FacultyProfile() {
     }
   };
 
-  const handleInputChange = (field: keyof Omit<Faculty, "id">, value: string | number) => {
+  const handleInputChange = (field: keyof AddFacultyForm, value: string | number) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const addExpertiseInput = () => {
+    setExpertiseInputs((prev) => [...prev, { id: Date.now(), expertise: '', file: null }]);
+  };
+
+  const removeExpertiseInput = (id: number) => {
+    setExpertiseInputs((prev) => {
+      if (prev.length === 1) return prev;
+      return prev.filter((entry) => entry.id !== id);
+    });
+  };
+
+  const updateExpertiseInput = (id: number, updates: Partial<ExpertiseCertificateInput>) => {
+    setExpertiseInputs((prev) => prev.map((entry) => (entry.id === id ? { ...entry, ...updates } : entry)));
   };
 
   return (
@@ -187,6 +270,9 @@ export function FacultyProfile() {
 
               <h3 className="font-semibold text-gray-900 mb-1">{member.name}</h3>
               <p className="text-sm text-orange-600 mb-3">{member.position}</p>
+              {member.expertise && (
+                <p className="text-xs text-gray-600 mb-3">Expertise: {member.expertise}</p>
+              )}
 
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
@@ -253,6 +339,10 @@ export function FacultyProfile() {
                 <p className="text-gray-900 mt-1">{selectedFaculty.position}</p>
               </div>
               <div>
+                <label className="text-sm font-semibold text-gray-600">Expertise</label>
+                <p className="text-gray-900 mt-1">{selectedFaculty.expertise || '-'}</p>
+              </div>
+              <div>
                 <label className="text-sm font-semibold text-gray-600">Years of Teaching</label>
                 <p className="text-gray-900 mt-1">{selectedFaculty.yearsOfTeaching} years</p>
               </div>
@@ -274,6 +364,11 @@ export function FacultyProfile() {
                 <X className="w-6 h-6" />
               </button>
             </div>
+            {submitError && (
+              <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {submitError}
+              </div>
+            )}
             <form onSubmit={(e) => { e.preventDefault(); handleAddFaculty(); }} className="grid grid-cols-2 gap-4">
               <div className="col-span-2">
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Full Name *</label>
@@ -346,6 +441,54 @@ export function FacultyProfile() {
                   onChange={(e) => handleInputChange("yearsOfTeaching", parseInt(e.target.value))}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
                 />
+              </div>
+              <div className="col-span-2">
+                <div className="mb-2 flex items-center justify-between">
+                  <label className="block text-sm font-semibold text-gray-700">Expertise Certificates *</label>
+                  <button
+                    type="button"
+                    onClick={addExpertiseInput}
+                    className="inline-flex items-center gap-1 rounded-lg bg-orange-100 px-3 py-1 text-xs font-medium text-orange-700 hover:bg-orange-200"
+                  >
+                    <Plus className="h-3 w-3" />
+                    Add Expertise
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  {expertiseInputs.map((entry, index) => (
+                    <div key={entry.id} className="rounded-lg border border-gray-200 p-3">
+                      <div className="mb-2 flex items-center justify-between">
+                        <p className="text-xs font-semibold text-gray-600">Entry {index + 1}</p>
+                        <button
+                          type="button"
+                          onClick={() => removeExpertiseInput(entry.id)}
+                          className="text-xs text-red-600 hover:text-red-700"
+                          disabled={expertiseInputs.length === 1}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                        <input
+                          type="text"
+                          value={entry.expertise}
+                          onChange={(e) => updateExpertiseInput(entry.id, { expertise: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                          placeholder="e.g., Ethical Hacking"
+                        />
+                        <input
+                          type="file"
+                          accept="application/pdf,.pdf"
+                          onChange={(e) => updateExpertiseInput(entry.id, { file: e.target.files?.[0] || null })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                        />
+                      </div>
+                      {entry.file && (
+                        <p className="mt-1 text-xs text-gray-600">Selected file: {entry.file.name}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
               <div className="col-span-2 flex gap-3 mt-4">
                 <button

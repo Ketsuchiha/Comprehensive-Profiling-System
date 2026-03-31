@@ -8,6 +8,10 @@ interface Student {
   firstName: string;
   middleName: string;
   lastName: string;
+  program: string;
+  yearLevel: string;
+  section: string;
+  courseCodes: string[];
   dateOfBirth: string;
   sex: string;
   civilStatus: string;
@@ -20,6 +24,7 @@ interface Student {
 
 export function StudentProfile() {
   const [students, setStudents] = useState<Student[]>([]);
+  const [subjects, setSubjects] = useState<Array<{ subject_code: string; subject_name: string }>>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [showModal, setShowModal] = useState(false);
@@ -29,6 +34,10 @@ export function StudentProfile() {
     firstName: "",
     middleName: "",
     lastName: "",
+    program: "",
+    yearLevel: "",
+    section: "",
+    courseCodes: [],
     dateOfBirth: "",
     sex: "Male",
     civilStatus: "Single",
@@ -48,6 +57,10 @@ export function StudentProfile() {
         firstName: s.first_name,
         middleName: s.middle_name || '',
         lastName: s.last_name,
+        program: s.program || '',
+        yearLevel: s.year_level ? String(s.year_level) : '',
+        section: s.section || '',
+        courseCodes: Array.isArray(s.courses) ? s.courses.map((c: { subject_code: string }) => c.subject_code) : [],
         dateOfBirth: s.birth_date ? s.birth_date.split('T')[0] : '',
         sex: s.sex || '',
         civilStatus: s.civil_status || '',
@@ -62,7 +75,19 @@ export function StudentProfile() {
     }
   };
 
-  useEffect(() => { fetchStudents(); }, []);
+  const fetchSubjects = async () => {
+    try {
+      const data = await api.get<Array<{ subject_code: string; subject_name: string }>>('/subjects');
+      setSubjects(data);
+    } catch (err) {
+      console.error('Failed to fetch subjects:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchStudents();
+    fetchSubjects();
+  }, []);
 
   const filteredStudents = students.filter((student) =>
     `${student.firstName} ${student.lastName}`.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -89,6 +114,13 @@ export function StudentProfile() {
         address: formData.address,
         emergency_contact: formData.emergencyContact,
         emergency_contact_num: formData.emergencyContactNumber,
+        academic: {
+          program: formData.program || null,
+          year_level: formData.yearLevel ? Number(formData.yearLevel) : null,
+          section: formData.section || null,
+          enrollment_status: 'Enrolled',
+        },
+        course_codes: formData.courseCodes,
       });
       await fetchStudents();
     } catch (err) {
@@ -100,6 +132,10 @@ export function StudentProfile() {
       firstName: "",
       middleName: "",
       lastName: "",
+      program: "",
+      yearLevel: "",
+      section: "",
+      courseCodes: [],
       dateOfBirth: "",
       sex: "Male",
       civilStatus: "Single",
@@ -124,6 +160,18 @@ export function StudentProfile() {
 
   const handleInputChange = (field: keyof Omit<Student, "id">, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleCourseToggle = (subjectCode: string) => {
+    setFormData((prev) => {
+      const exists = prev.courseCodes.includes(subjectCode);
+      return {
+        ...prev,
+        courseCodes: exists
+          ? prev.courseCodes.filter((code) => code !== subjectCode)
+          : [...prev.courseCodes, subjectCode],
+      };
+    });
   };
 
   return (
@@ -178,6 +226,9 @@ export function StudentProfile() {
                     Sex
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                    Section
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
                     Contact
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
@@ -196,6 +247,9 @@ export function StudentProfile() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                       {student.sex}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                      {student.section || '-'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                       {student.contactNumber}
@@ -260,6 +314,14 @@ export function StudentProfile() {
               <div>
                 <label className="text-sm font-semibold text-gray-600">Date of Birth</label>
                 <p className="text-gray-900 mt-1">{selectedStudent.dateOfBirth}</p>
+              </div>
+              <div>
+                <label className="text-sm font-semibold text-gray-600">Program</label>
+                <p className="text-gray-900 mt-1">{selectedStudent.program || '-'}</p>
+              </div>
+              <div>
+                <label className="text-sm font-semibold text-gray-600">Year and Section</label>
+                <p className="text-gray-900 mt-1">{selectedStudent.yearLevel || '-'} / {selectedStudent.section || '-'}</p>
               </div>
               <div>
                 <label className="text-sm font-semibold text-gray-600">Sex</label>
@@ -349,6 +411,40 @@ export function StudentProfile() {
                 />
               </div>
               <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Program</label>
+                <input
+                  type="text"
+                  value={formData.program}
+                  onChange={(e) => handleInputChange("program", e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  placeholder="e.g., BSCS"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Year Level</label>
+                <select
+                  value={formData.yearLevel}
+                  onChange={(e) => handleInputChange("yearLevel", e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                >
+                  <option value="">Select year</option>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                  <option value="4">4</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Section</label>
+                <input
+                  type="text"
+                  value={formData.section}
+                  onChange={(e) => handleInputChange("section", e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  placeholder="e.g., CS-2A"
+                />
+              </div>
+              <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Date of Birth *</label>
                 <input
                   type="date"
@@ -426,6 +522,27 @@ export function StudentProfile() {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
                   placeholder="Full Name"
                 />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Assigned Courses</label>
+                <div className="max-h-44 overflow-y-auto rounded-lg border border-gray-300 p-3">
+                  {subjects.length === 0 && (
+                    <p className="text-sm text-gray-500">No subjects found. Add subjects first.</p>
+                  )}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {subjects.map((subject) => (
+                      <label key={subject.subject_code} className="flex items-start gap-2 text-sm text-gray-700">
+                        <input
+                          type="checkbox"
+                          checked={formData.courseCodes.includes(subject.subject_code)}
+                          onChange={() => handleCourseToggle(subject.subject_code)}
+                          className="mt-0.5"
+                        />
+                        <span>{subject.subject_code} - {subject.subject_name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Emergency Contact Number *</label>
