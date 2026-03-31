@@ -594,7 +594,8 @@ export function StudentProfile() {
                 />
               </div>
               <div className="col-span-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-800">
-                Auto-generated password: {(formData.lastName?.trim()?.[0] || 'X').toUpperCase()}{formData.dateOfBirth || 'YYYY-MM-DD'}
+                <p>Auto-generated password: {(formData.lastName?.trim()?.[0] || 'X').toUpperCase()}{formData.dateOfBirth || 'YYYY-MM-DD'}</p>
+                <p className="mt-1 text-xs">Temporary password only. Require account owner to change password after first login.</p>
               </div>
               <div className="col-span-2 flex gap-3 mt-4">
                 <button
