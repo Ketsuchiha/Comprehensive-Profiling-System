@@ -1,7 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const pool = require('../config/db');
+
+function generateRefId(userType) {
+  const prefix = String(userType || 'Admin').slice(0, 3).toUpperCase();
+  const randomPart = crypto.randomBytes(2).toString('hex');
+  return `${prefix}-${Date.now().toString(36)}-${randomPart}`.slice(0, 20);
+}
 
 // POST /login
 router.post('/login', async (req, res) => {
@@ -43,21 +50,36 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'username, password, and user_type are required' });
     }
 
+    const providedRefId = typeof ref_id === 'string' ? ref_id.trim() : '';
+    const resolvedRefId = providedRefId || generateRefId(user_type);
+    if (resolvedRefId.length > 20) {
+      return res.status(400).json({ error: 'ref_id must be 20 characters or fewer' });
+    }
+
     const salt = await bcrypt.genSalt(10);
     const password_hash = await bcrypt.hash(password, salt);
 
     const [result] = await pool.query(
       'INSERT INTO users (ref_id, user_type, username, password_hash) VALUES (?, ?, ?, ?)',
-      [ref_id || null, user_type, username, password_hash]
+      [resolvedRefId, user_type, username, password_hash]
     );
 
     res.status(201).json({
       message: 'User registered successfully',
-      user: { user_id: result.insertId, ref_id, user_type, username, is_active: 1 }
+      user: { user_id: result.insertId, ref_id: resolvedRefId, user_type, username, is_active: 1 }
     });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') {
-      return res.status(409).json({ error: 'Username or ref_id already exists' });
+      if (err.sqlMessage && err.sqlMessage.includes("'username'")) {
+        return res.status(409).json({ error: 'Email already exists' });
+      }
+      if (err.sqlMessage && err.sqlMessage.includes("'ref_id'")) {
+        return res.status(409).json({ error: 'Reference ID already exists' });
+      }
+      return res.status(409).json({ error: 'Account already exists' });
+    }
+    if (err.code === 'ER_BAD_NULL_ERROR' || err.code === 'ER_DATA_TOO_LONG') {
+      return res.status(400).json({ error: 'Invalid registration data' });
     }
     res.status(500).json({ error: err.message });
   }

@@ -2,6 +2,10 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
 
+function isMissingTableError(err) {
+  return err && err.code === 'ER_NO_SUCH_TABLE';
+}
+
 // ─── STUDENTS CRUD ──────────────────────────────────────────────
 
 // GET / - List all students with academic info
@@ -31,6 +35,20 @@ router.get('/:id', async (req, res) => {
     const [grades] = await pool.query('SELECT * FROM student_grades WHERE student_id = ?', [id]);
     const [internships] = await pool.query('SELECT * FROM student_internship WHERE student_id = ?', [id]);
     const [orgs] = await pool.query('SELECT * FROM student_orgs WHERE student_id = ?', [id]);
+    let courses = [];
+    try {
+      const [courseRows] = await pool.query(
+        `SELECT sca.subject_code, s.subject_name
+         FROM student_course_assignments sca
+         LEFT JOIN subjects s ON s.subject_code = sca.subject_code
+         WHERE sca.student_id = ?
+         ORDER BY sca.subject_code`,
+        [id]
+      );
+      courses = courseRows;
+    } catch (coursesErr) {
+      if (!isMissingTableError(coursesErr)) throw coursesErr;
+    }
 
     res.json({
       ...student[0],
@@ -38,7 +56,8 @@ router.get('/:id', async (req, res) => {
       documents,
       grades,
       internships,
-      orgs
+      orgs,
+      courses
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -102,7 +121,7 @@ router.post('/', async (req, res) => {
       student_id, first_name, middle_name, last_name, birth_date, sex,
       civil_status, contact_number, email, address, emergency_contact,
       emergency_contact_num, profile_photo, nationality, religion,
-      academic
+      academic, course_codes
     } = req.body;
 
     if (!student_id || !first_name || !last_name) {
@@ -131,10 +150,67 @@ router.post('/', async (req, res) => {
       );
     }
 
+    if (Array.isArray(course_codes) && course_codes.length > 0) {
+      try {
+        const values = course_codes.map((subjectCode) => [student_id, subjectCode]);
+        await pool.query(
+          'INSERT INTO student_course_assignments (student_id, subject_code) VALUES ? ON DUPLICATE KEY UPDATE subject_code = VALUES(subject_code)',
+          [values]
+        );
+      } catch (courseErr) {
+        if (!isMissingTableError(courseErr)) throw courseErr;
+      }
+    }
+
     res.status(201).json({ message: 'Student created successfully', student_id });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') {
       return res.status(409).json({ error: 'Student ID or email already exists' });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /:id/courses
+router.get('/:id/courses', async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT sca.subject_code, s.subject_name
+       FROM student_course_assignments sca
+       LEFT JOIN subjects s ON s.subject_code = sca.subject_code
+       WHERE sca.student_id = ?
+       ORDER BY sca.subject_code`,
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (err) {
+    if (isMissingTableError(err)) {
+      return res.status(500).json({ error: 'student_course_assignments table not found. Apply SQL migration first.' });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /:id/courses
+router.put('/:id/courses', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { course_codes } = req.body;
+
+    if (!Array.isArray(course_codes)) {
+      return res.status(400).json({ error: 'course_codes must be an array' });
+    }
+
+    await pool.query('DELETE FROM student_course_assignments WHERE student_id = ?', [id]);
+    if (course_codes.length > 0) {
+      const values = course_codes.map((subjectCode) => [id, subjectCode]);
+      await pool.query('INSERT INTO student_course_assignments (student_id, subject_code) VALUES ?', [values]);
+    }
+
+    res.json({ message: 'Student course assignments updated successfully' });
+  } catch (err) {
+    if (isMissingTableError(err)) {
+      return res.status(500).json({ error: 'student_course_assignments table not found. Apply SQL migration first.' });
     }
     res.status(500).json({ error: err.message });
   }

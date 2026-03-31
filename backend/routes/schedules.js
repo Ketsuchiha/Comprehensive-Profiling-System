@@ -46,6 +46,25 @@ router.post('/', async (req, res) => {
     const { subject_code, section, faculty_id, room_id, semester, academic_year, day_of_week, start_time, end_time, schedule_type } = req.body;
     if (!subject_code) return res.status(400).json({ error: 'subject_code is required' });
 
+    const [subjectRows] = await pool.query('SELECT subject_code FROM subjects WHERE subject_code = ?', [subject_code]);
+    if (subjectRows.length === 0) {
+      return res.status(400).json({ error: 'Subject code does not exist. Create/select a valid subject first.' });
+    }
+
+    if (faculty_id) {
+      const [facultyRows] = await pool.query('SELECT faculty_id FROM faculty WHERE faculty_id = ?', [faculty_id]);
+      if (facultyRows.length === 0) {
+        return res.status(400).json({ error: 'Faculty ID does not exist.' });
+      }
+    }
+
+    if (room_id) {
+      const [roomRows] = await pool.query('SELECT room_id FROM rooms WHERE room_id = ?', [room_id]);
+      if (roomRows.length === 0) {
+        return res.status(400).json({ error: 'Room ID does not exist.' });
+      }
+    }
+
     const [result] = await pool.query(
       `INSERT INTO schedules (subject_code, section, faculty_id, room_id, semester, academic_year, day_of_week, start_time, end_time, schedule_type)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -55,6 +74,12 @@ router.post('/', async (req, res) => {
 
     res.status(201).json({ message: 'Schedule created successfully', schedule_id: result.insertId });
   } catch (err) {
+    if (err.code === 'ER_NO_REFERENCED_ROW_2') {
+      return res.status(400).json({ error: 'Related record not found. Verify subject, faculty, and room values.' });
+    }
+    if (err.code === 'ER_TRUNCATED_WRONG_VALUE' || err.code === 'ER_WRONG_VALUE_FOR_TYPE') {
+      return res.status(400).json({ error: 'Invalid time or enum value in schedule data.' });
+    }
     res.status(500).json({ error: err.message });
   }
 });

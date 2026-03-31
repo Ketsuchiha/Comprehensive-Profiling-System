@@ -1,7 +1,20 @@
 const express = require('express');
 const router = express.Router();
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const pool = require('../config/db');
+
+function decodeBase64File(data) {
+  if (!data || typeof data !== 'string') return null;
+  const base64 = data.includes(',') ? data.split(',')[1] : data;
+  return Buffer.from(base64, 'base64');
+}
+
+async function hasFacultyCertificationTable() {
+  const [rows] = await pool.query("SHOW TABLES LIKE 'faculty_expertise_certifications'");
+  return rows.length > 0;
+}
 
 // ─── FACULTY CRUD ───────────────────────────────────────────────
 
@@ -106,7 +119,7 @@ router.post('/', async (req, res) => {
     const {
       faculty_id, first_name, middle_name, last_name, birth_date, gender,
       email, contact_no, address, profile_photo, specialization,
-      employment, rank
+      employment, rank, certification
     } = req.body;
 
     if (!first_name || !last_name || !email) {
@@ -146,7 +159,40 @@ router.post('/', async (req, res) => {
       );
     }
 
-    res.status(201).json({ message: 'Faculty created successfully', faculty_id: generatedFacultyId });
+    let warning;
+    if (certification?.file_data_base64 && certification?.file_name && certification?.expertise) {
+      const hasCertTable = await hasFacultyCertificationTable();
+      if (!hasCertTable) {
+        warning = 'faculty_expertise_certifications table not found. Apply SQL migration before saving certificates.';
+      } else {
+        const fileBuffer = decodeBase64File(certification.file_data_base64);
+        if (!fileBuffer) {
+          return res.status(400).json({ error: 'Invalid certification file data' });
+        }
+
+        const uploadsDir = path.join(__dirname, '..', 'uploads', 'faculty-certificates');
+        fs.mkdirSync(uploadsDir, { recursive: true });
+
+        const ext = path.extname(certification.file_name).toLowerCase() || '.pdf';
+        const safeExt = ext === '.pdf' ? ext : '.pdf';
+        const storedFilename = `${generatedFacultyId}-${Date.now()}${safeExt}`;
+        const filePath = path.join(uploadsDir, storedFilename);
+        fs.writeFileSync(filePath, fileBuffer);
+
+        await pool.query(
+          `INSERT INTO faculty_expertise_certifications (faculty_id, expertise, certificate_file, mime_type)
+           VALUES (?, ?, ?, ?)`,
+          [
+            generatedFacultyId,
+            certification.expertise,
+            `/uploads/faculty-certificates/${storedFilename}`,
+            certification.mime_type || 'application/pdf',
+          ]
+        );
+      }
+    }
+
+    res.status(201).json({ message: 'Faculty created successfully', faculty_id: generatedFacultyId, warning });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') {
       return res.status(409).json({ error: 'Faculty ID or email already exists' });
@@ -195,6 +241,62 @@ router.delete('/:id', async (req, res) => {
 
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Faculty not found' });
     res.json({ message: 'Faculty deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /:id/certifications
+router.get('/:id/certifications', async (req, res) => {
+  try {
+    const hasCertTable = await hasFacultyCertificationTable();
+    if (!hasCertTable) return res.json([]);
+
+    const [rows] = await pool.query(
+      `SELECT cert_id, faculty_id, expertise, certificate_file, mime_type, uploaded_at
+       FROM faculty_expertise_certifications
+       WHERE faculty_id = ?
+       ORDER BY uploaded_at DESC`,
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /:id/certifications
+router.post('/:id/certifications', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { expertise, file_name, file_data_base64, mime_type } = req.body;
+    if (!expertise || !file_name || !file_data_base64) {
+      return res.status(400).json({ error: 'expertise, file_name, and file_data_base64 are required' });
+    }
+
+    const hasCertTable = await hasFacultyCertificationTable();
+    if (!hasCertTable) {
+      return res.status(500).json({ error: 'faculty_expertise_certifications table not found. Apply SQL migration first.' });
+    }
+
+    const fileBuffer = decodeBase64File(file_data_base64);
+    if (!fileBuffer) return res.status(400).json({ error: 'Invalid certification file data' });
+
+    const uploadsDir = path.join(__dirname, '..', 'uploads', 'faculty-certificates');
+    fs.mkdirSync(uploadsDir, { recursive: true });
+
+    const ext = path.extname(file_name).toLowerCase() || '.pdf';
+    const safeExt = ext === '.pdf' ? ext : '.pdf';
+    const storedFilename = `${id}-${Date.now()}${safeExt}`;
+    fs.writeFileSync(path.join(uploadsDir, storedFilename), fileBuffer);
+
+    const [result] = await pool.query(
+      `INSERT INTO faculty_expertise_certifications (faculty_id, expertise, certificate_file, mime_type)
+       VALUES (?, ?, ?, ?)`,
+      [id, expertise, `/uploads/faculty-certificates/${storedFilename}`, mime_type || 'application/pdf']
+    );
+
+    res.status(201).json({ message: 'Certification uploaded', cert_id: result.insertId });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

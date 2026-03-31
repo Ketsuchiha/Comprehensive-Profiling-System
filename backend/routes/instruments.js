@@ -1,6 +1,41 @@
 const express = require('express');
 const router = express.Router();
+const fs = require('fs');
+const path = require('path');
 const pool = require('../config/db');
+
+function decodeBase64File(data) {
+  if (!data || typeof data !== 'string') return null;
+  const base64 = data.includes(',') ? data.split(',')[1] : data;
+  return Buffer.from(base64, 'base64');
+}
+
+function extensionFromMimeType(mimeType) {
+  if (!mimeType || typeof mimeType !== 'string') return '';
+  const normalized = mimeType.toLowerCase();
+  if (normalized.includes('pdf')) return '.pdf';
+  if (normalized.includes('word') && normalized.includes('document')) return '.docx';
+  if (normalized === 'application/msword') return '.doc';
+  return '';
+}
+
+function saveInstrumentFile(fileDataBase64, fileName, mimeType) {
+  const fileBuffer = decodeBase64File(fileDataBase64);
+  if (!fileBuffer) return null;
+
+  const uploadsDir = path.join(__dirname, '..', 'uploads', 'instruments');
+  fs.mkdirSync(uploadsDir, { recursive: true });
+
+  const originalExt = path.extname(fileName || '').toLowerCase();
+  const mimeExt = extensionFromMimeType(mimeType);
+  const safeExt = ['.pdf', '.doc', '.docx'].includes(originalExt)
+    ? originalExt
+    : (['.pdf', '.doc', '.docx'].includes(mimeExt) ? mimeExt : '.bin');
+  const storedFileName = `instrument-${Date.now()}-${Math.floor(Math.random() * 100000)}${safeExt}`;
+  fs.writeFileSync(path.join(uploadsDir, storedFileName), fileBuffer);
+
+  return `/uploads/instruments/${storedFileName}`;
+}
 
 // ─── SYLLABUS CRUD ──────────────────────────────────────────────
 
@@ -46,20 +81,69 @@ router.get('/syllabus/:id', async (req, res) => {
 // POST /syllabus - Create syllabus
 router.post('/syllabus', async (req, res) => {
   try {
-    const { subject_code, faculty_id, semester, academic_year, course_description, course_outcomes, grading_system, references_biblio, approved_by, is_approved } = req.body;
-    if (!subject_code) return res.status(400).json({ error: 'subject_code is required' });
+    const {
+      subject_code,
+      subject_name,
+      title,
+      faculty_id,
+      semester,
+      academic_year,
+      course_description,
+      course_outcomes,
+      grading_system,
+      references_biblio,
+      approved_by,
+      is_approved,
+      file_name,
+      file_data_base64,
+      mime_type,
+    } = req.body;
+    const normalizedSubjectCode = typeof subject_code === 'string' ? subject_code.trim().toUpperCase() : '';
+    if (!normalizedSubjectCode) {
+      return res.status(400).json({ error: 'subject_code is required' });
+    }
+
+    const [subjectRows] = await pool.query('SELECT subject_code FROM subjects WHERE subject_code = ?', [normalizedSubjectCode]);
+    if (subjectRows.length === 0) {
+      const fallbackSubjectName =
+        (typeof subject_name === 'string' && subject_name.trim()) ||
+        (typeof title === 'string' && title.trim()) ||
+        normalizedSubjectCode;
+
+      await pool.query(
+        `INSERT INTO subjects (subject_code, subject_name, units, lec_hours, lab_hours, subject_type)
+         VALUES (?, ?, 3, 3, 0, 'Professional')`,
+        [normalizedSubjectCode, fallbackSubjectName]
+      );
+    }
+
+    if (faculty_id) {
+      const [facultyRows] = await pool.query('SELECT faculty_id FROM faculty WHERE faculty_id = ?', [faculty_id]);
+      if (facultyRows.length === 0) {
+        return res.status(400).json({ error: 'Invalid faculty_id' });
+      }
+    }
+
+    const uploadedFilePath = saveInstrumentFile(file_data_base64, file_name, mime_type);
+    const resolvedReferences = uploadedFilePath || references_biblio || null;
 
     const [result] = await pool.query(
       `INSERT INTO syllabus (subject_code, faculty_id, semester, academic_year, course_description,
         course_outcomes, grading_system, references_biblio, approved_by, is_approved)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [subject_code, faculty_id || null, semester || null, academic_year || null,
+      [normalizedSubjectCode, faculty_id || null, semester || null, academic_year || null,
        course_description || null, course_outcomes || null, grading_system || null,
-       references_biblio || null, approved_by || null, is_approved || 0]
+       resolvedReferences, approved_by || null, is_approved || 0]
     );
 
     res.status(201).json({ message: 'Syllabus created successfully', syllabus_id: result.insertId });
   } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ error: 'Syllabus/subject duplicate conflict' });
+    }
+    if (err.code === 'ER_NO_REFERENCED_ROW_2') {
+      return res.status(400).json({ error: 'Invalid subject_code or faculty_id' });
+    }
     res.status(500).json({ error: err.message });
   }
 });
@@ -167,9 +251,10 @@ router.delete('/topics/:topicId', async (req, res) => {
 router.get('/lessons', async (req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT l.*, st.topic_title, st.syllabus_id
+      `SELECT l.*, st.topic_title, st.syllabus_id, sy.subject_code
        FROM lessons l
        LEFT JOIN syllabus_topics st ON l.topic_id = st.topic_id
+       LEFT JOIN syllabus sy ON st.syllabus_id = sy.syllabus_id
        ORDER BY l.created_at DESC`
     );
     res.json(rows);
@@ -197,13 +282,16 @@ router.get('/lessons/:id', async (req, res) => {
 // POST /lessons - Create lesson
 router.post('/lessons', async (req, res) => {
   try {
-    const { topic_id, title, content_type, file_path, external_url, is_published } = req.body;
+    const { topic_id, title, content_type, file_path, external_url, is_published, file_name, file_data_base64, mime_type } = req.body;
     if (!title) return res.status(400).json({ error: 'title is required' });
+
+    const uploadedFilePath = saveInstrumentFile(file_data_base64, file_name, mime_type);
+    const resolvedFilePath = uploadedFilePath || file_path || null;
 
     const [result] = await pool.query(
       `INSERT INTO lessons (topic_id, title, content_type, file_path, external_url, is_published, published_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [topic_id || null, title, content_type || null, file_path || null, external_url || null,
+      [topic_id || null, title, content_type || null, resolvedFilePath, external_url || null,
        is_published || 0, is_published ? new Date() : null]
     );
 
