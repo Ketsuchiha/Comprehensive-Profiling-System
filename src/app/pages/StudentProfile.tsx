@@ -268,15 +268,17 @@ export function StudentProfile() {
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => handleViewStudent(student)}
+                          title="View student"
                           className="p-1 text-blue-600 hover:bg-blue-50 rounded"
                         >
                           <Eye className="w-4 h-4" />
                         </button>
-                        <button className="p-1 text-green-600 hover:bg-green-50 rounded">
+                        <button title="Edit student" className="p-1 text-green-600 hover:bg-green-50 rounded">
                           <Edit className="w-4 h-4" />
                         </button>
                         <button 
                           onClick={() => handleDeleteStudent(student.id)}
+                          title="Delete student"
                           className="p-1 text-red-600 hover:bg-red-50 rounded"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -299,6 +301,7 @@ export function StudentProfile() {
               <h2 className="text-2xl font-bold text-gray-900">Student Details</h2>
               <button
                 onClick={() => setShowModal(false)}
+                title="Close student details"
                 className="text-gray-500 hover:text-gray-700"
               >
                 <X className="w-6 h-6" />
@@ -382,6 +385,7 @@ export function StudentProfile() {
               <h2 className="text-2xl font-bold text-gray-900">Add New Student</h2>
               <button
                 onClick={() => setShowAddModal(false)}
+                title="Close add student form"
                 className="text-gray-500 hover:text-gray-700"
               >
                 <X className="w-6 h-6" />
@@ -393,6 +397,7 @@ export function StudentProfile() {
                 <input
                   type="text"
                   required
+                  title="Student ID"
                   value={formData.studentId}
                   onChange={(e) => handleInputChange("studentId", e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
@@ -404,6 +409,7 @@ export function StudentProfile() {
                 <input
                   type="text"
                   required
+                  title="First Name"
                   value={formData.firstName}
                   onChange={(e) => handleInputChange("firstName", e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
@@ -413,6 +419,7 @@ export function StudentProfile() {
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Middle Name</label>
                 <input
                   type="text"
+                  title="Middle Name"
                   value={formData.middleName}
                   onChange={(e) => handleInputChange("middleName", e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
@@ -423,26 +430,31 @@ export function StudentProfile() {
                 <input
                   type="text"
                   required
+                  title="Last Name"
                   value={formData.lastName}
                   onChange={(e) => handleInputChange("lastName", e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
                 />
               </div>
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Program</label>
-                <input
-                  type="text"
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Program *</label>
+                <select
+                  required
                   value={formData.program}
-                  onChange={(e) => handleInputChange("program", e.target.value)}
+                  onChange={(e) => handleInputChange("program", e.target.value as "IT" | "CS")}
+                  title="Program"
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  placeholder="e.g., BSCS"
-                />
+                >
+                  <option value="IT">IT</option>
+                  <option value="CS">CS</option>
+                </select>
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Year Level</label>
                 <select
                   value={formData.yearLevel}
                   onChange={(e) => handleInputChange("yearLevel", e.target.value)}
+                  title="Year Level"
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
                 >
                   <option value="">Select year</option>
@@ -458,6 +470,7 @@ export function StudentProfile() {
                   type="text"
                   value={formData.section}
                   onChange={(e) => handleInputChange("section", e.target.value)}
+                  title="Section"
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
                   placeholder="e.g., CS-2A"
                 />
@@ -467,6 +480,7 @@ export function StudentProfile() {
                 <input
                   type="date"
                   required
+                  title="Date of Birth"
                   value={formData.dateOfBirth}
                   onChange={(e) => handleInputChange("dateOfBirth", e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
@@ -478,6 +492,7 @@ export function StudentProfile() {
                   required
                   value={formData.sex}
                   onChange={(e) => handleInputChange("sex", e.target.value)}
+                  title="Sex"
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
                 >
                   <option value="Male">Male</option>
@@ -490,6 +505,7 @@ export function StudentProfile() {
                   required
                   value={formData.civilStatus}
                   onChange={(e) => handleInputChange("civilStatus", e.target.value)}
+                  title="Civil Status"
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
                 >
                   <option value="Single">Single</option>
@@ -503,6 +519,7 @@ export function StudentProfile() {
                 <input
                   type="tel"
                   required
+                  title="Contact Number"
                   value={formData.contactNumber}
                   onChange={(e) => handleInputChange("contactNumber", e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
@@ -514,6 +531,7 @@ export function StudentProfile() {
                 <input
                   type="email"
                   required
+                  title="Email"
                   value={formData.email}
                   onChange={(e) => handleInputChange("email", e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
@@ -524,6 +542,7 @@ export function StudentProfile() {
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Address *</label>
                 <textarea
                   required
+                  title="Address"
                   value={formData.address}
                   onChange={(e) => handleInputChange("address", e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
@@ -535,6 +554,7 @@ export function StudentProfile() {
                 <input
                   type="text"
                   required
+                  title="Emergency Contact"
                   value={formData.emergencyContact}
                   onChange={(e) => handleInputChange("emergencyContact", e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
@@ -567,6 +587,7 @@ export function StudentProfile() {
                 <input
                   type="tel"
                   required
+                  title="Emergency Contact Number"
                   value={formData.emergencyContactNumber}
                   onChange={(e) => handleInputChange("emergencyContactNumber", e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"

@@ -213,7 +213,7 @@ export function CollegeResearch() {
               </div>
 
               <div className="pt-4 border-t border-gray-200">
-                <button className="w-full py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors">
+                <button title="View research details" className="w-full py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors">
                   View Details
                 </button>
               </div>
@@ -230,6 +230,7 @@ export function CollegeResearch() {
               <h2 className="text-2xl font-bold text-gray-900">Add New Research Project</h2>
               <button
                 onClick={() => setShowAddModal(false)}
+                title="Close research form"
                 className="text-gray-500 hover:text-gray-700"
               >
                 <X className="w-6 h-6" />
@@ -241,6 +242,7 @@ export function CollegeResearch() {
                 <input
                   type="text"
                   required
+                  title="Research title"
                   value={formData.title}
                   onChange={(e) => handleInputChange("title", e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
@@ -253,6 +255,7 @@ export function CollegeResearch() {
                   <input
                     type="text"
                     required
+                    title="Lead researcher"
                     value={formData.author}
                     onChange={(e) => handleInputChange("author", e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
@@ -264,6 +267,7 @@ export function CollegeResearch() {
                   <input
                     type="text"
                     required
+                    title="Category"
                     value={formData.category}
                     onChange={(e) => handleInputChange("category", e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
@@ -278,6 +282,7 @@ export function CollegeResearch() {
                     required
                     value={formData.status}
                     onChange={(e) => handleInputChange("status", e.target.value as Research["status"])}
+                    title="Research status"
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
                   >
                     <option value="ongoing">Ongoing</option>
@@ -290,6 +295,7 @@ export function CollegeResearch() {
                   <input
                     type="date"
                     required
+                    title="Start date"
                     value={formData.startDate}
                     onChange={(e) => handleInputChange("startDate", e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
@@ -302,6 +308,7 @@ export function CollegeResearch() {
                   type="number"
                   required
                   min="0"
+                  title="Number of collaborators"
                   value={formData.collaborators || ""}
                   onChange={(e) => handleInputChange("collaborators", parseInt(e.target.value))}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
@@ -311,6 +318,7 @@ export function CollegeResearch() {
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Description *</label>
                 <textarea
                   required
+                  title="Description"
                   value={formData.description}
                   onChange={(e) => handleInputChange("description", e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
