@@ -12,18 +12,24 @@ export function Login() {
   const [isLoading, setIsLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
+  const studentPortalUrl = import.meta.env.VITE_STUDENT_PORTAL_URL || 'http://localhost:5174/login';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setIsLoading(true);
 
-    const success = await login(email, password);
-    
-    if (success) {
+    const result = await login(email, password);
+
+    if (result.success) {
+      if (result.user?.role === 'Student') {
+        setIsLoading(false);
+        window.location.assign(studentPortalUrl);
+        return;
+      }
       navigate('/');
     } else {
-      setError('Invalid email or password');
+      setError(result.error || 'Invalid email or password');
     }
     
     setIsLoading(false);

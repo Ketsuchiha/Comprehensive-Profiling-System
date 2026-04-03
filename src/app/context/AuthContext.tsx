@@ -11,7 +11,7 @@ interface User {
 
 interface AuthContextType {
   user: User | null;
-  login: (email: string, password: string) => Promise<boolean>;
+  login: (email: string, password: string) => Promise<{ success: boolean; user?: User; error?: string }>;
   register: (email: string, password: string, name: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   isAuthenticated: boolean;
@@ -32,7 +32,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   });
 
-  const login = async (email: string, password: string): Promise<boolean> => {
+  const login = async (email: string, password: string): Promise<{ success: boolean; user?: User; error?: string }> => {
     try {
       const data = await api.post<{ user: { user_id: number; username: string; user_type: string; ref_id: string; display_name?: string } }>('/auth/login', {
         username: email,
@@ -45,11 +45,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         role: data.user.user_type,
         refId: data.user.ref_id,
       };
+
+      if (userData.role === 'Student') {
+        return { success: true, user: userData };
+      }
+
       setUser(userData);
       localStorage.setItem('ccs_user', JSON.stringify(userData));
-      return true;
-    } catch {
-      return false;
+      return { success: true, user: userData };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Login failed' };
     }
   };
 
