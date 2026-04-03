@@ -11,7 +11,6 @@ interface Student {
   program: string;
   yearLevel: string;
   section: string;
-  courseCodes: string[];
   dateOfBirth: string;
   sex: string;
   civilStatus: string;
@@ -20,12 +19,16 @@ interface Student {
   address: string;
   emergencyContact: string;
   emergencyContactNumber: string;
+  nationality: string;
+  religion: string;
+  skills: string;
 }
 
 export function StudentProfile() {
   const [students, setStudents] = useState<Student[]>([]);
-  const [subjects, setSubjects] = useState<Array<{ subject_code: string; subject_name: string }>>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [skillFilter, setSkillFilter] = useState("");
+  const [submitError, setSubmitError] = useState("");
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -37,7 +40,6 @@ export function StudentProfile() {
     program: "",
     yearLevel: "",
     section: "",
-    courseCodes: [],
     dateOfBirth: "",
     sex: "Male",
     civilStatus: "Single",
@@ -46,6 +48,9 @@ export function StudentProfile() {
     address: "",
     emergencyContact: "",
     emergencyContactNumber: "",
+    nationality: "",
+    religion: "",
+    skills: "",
   });
 
   const fetchStudents = async () => {
@@ -60,7 +65,6 @@ export function StudentProfile() {
         program: s.program || '',
         yearLevel: s.year_level ? String(s.year_level) : '',
         section: s.section || '',
-        courseCodes: Array.isArray(s.courses) ? s.courses.map((c: { subject_code: string }) => c.subject_code) : [],
         dateOfBirth: s.birth_date ? s.birth_date.split('T')[0] : '',
         sex: s.sex || '',
         civilStatus: s.civil_status || '',
@@ -69,30 +73,39 @@ export function StudentProfile() {
         address: s.address || '',
         emergencyContact: s.emergency_contact || '',
         emergencyContactNumber: s.emergency_contact_num || '',
+        nationality: s.nationality || '',
+        religion: s.religion || '',
+        skills: s.skills || '',
       })));
     } catch (err) {
       console.error('Failed to fetch students:', err);
     }
   };
 
-  const fetchSubjects = async () => {
-    try {
-      const data = await api.get<Array<{ subject_code: string; subject_name: string }>>('/subjects');
-      setSubjects(data);
-    } catch (err) {
-      console.error('Failed to fetch subjects:', err);
-    }
-  };
-
   useEffect(() => {
     fetchStudents();
-    fetchSubjects();
   }, []);
 
-  const filteredStudents = students.filter((student) =>
-    `${student.firstName} ${student.lastName}`.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    student.studentId.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredStudents = students.filter((student) => {
+    const normalizedSearch = searchQuery.toLowerCase().trim();
+    const normalizedSkillFilter = skillFilter.toLowerCase().trim();
+
+    const matchesSearch =
+      !normalizedSearch ||
+      `${student.firstName} ${student.lastName}`.toLowerCase().includes(normalizedSearch) ||
+      student.studentId.toLowerCase().includes(normalizedSearch);
+
+    const matchesSkill =
+      !normalizedSkillFilter ||
+      student.skills
+        .toLowerCase()
+        .split(',')
+        .map((skill) => skill.trim())
+        .filter(Boolean)
+        .some((skill) => skill.includes(normalizedSkillFilter));
+
+    return matchesSearch && matchesSkill;
+  });
 
   const handleViewStudent = (student: Student) => {
     setSelectedStudent(student);
@@ -100,31 +113,54 @@ export function StudentProfile() {
   };
 
   const handleAddStudent = async () => {
+    setSubmitError('');
+    const requiredChecks: Array<{ key: string; value: string }> = [
+      { key: 'Student ID', value: formData.studentId },
+      { key: 'First Name', value: formData.firstName },
+      { key: 'Last Name', value: formData.lastName },
+      { key: 'Date of Birth', value: formData.dateOfBirth },
+      { key: 'Sex', value: formData.sex },
+      { key: 'Contact Number', value: formData.contactNumber },
+      { key: 'Email', value: formData.email },
+      { key: 'Address', value: formData.address },
+      { key: 'Emergency Contact', value: formData.emergencyContact },
+      { key: 'Emergency Contact Number', value: formData.emergencyContactNumber },
+    ];
+
+    const missing = requiredChecks.filter((item) => !item.value || !item.value.trim()).map((item) => item.key);
+    if (missing.length > 0) {
+      setSubmitError(`Please complete required fields: ${missing.join(', ')}`);
+      return;
+    }
+
     try {
       await api.post('/students', {
-        student_id: formData.studentId,
-        first_name: formData.firstName,
-        middle_name: formData.middleName,
-        last_name: formData.lastName,
+        student_id: formData.studentId.trim(),
+        first_name: formData.firstName.trim(),
+        middle_name: formData.middleName.trim(),
+        last_name: formData.lastName.trim(),
         birth_date: formData.dateOfBirth,
-        sex: formData.sex,
-        civil_status: formData.civilStatus,
-        contact_number: formData.contactNumber,
-        email: formData.email,
-        address: formData.address,
-        emergency_contact: formData.emergencyContact,
-        emergency_contact_num: formData.emergencyContactNumber,
+        sex: formData.sex.trim(),
+        civil_status: formData.civilStatus.trim(),
+        contact_number: formData.contactNumber.trim(),
+        email: formData.email.trim().toLowerCase(),
+        address: formData.address.trim(),
+        emergency_contact: formData.emergencyContact.trim(),
+        emergency_contact_num: formData.emergencyContactNumber.trim(),
+        nationality: formData.nationality.trim(),
+        religion: formData.religion.trim(),
+        skills: formData.skills.trim(),
         academic: {
           program: formData.program || null,
           year_level: formData.yearLevel ? Number(formData.yearLevel) : null,
-          section: formData.section || null,
           enrollment_status: 'Enrolled',
         },
-        course_codes: formData.courseCodes,
       });
       await fetchStudents();
     } catch (err) {
       console.error('Failed to add student:', err);
+      setSubmitError(err instanceof Error ? err.message : 'Failed to add student');
+      return;
     }
     setShowAddModal(false);
     setFormData({
@@ -135,7 +171,6 @@ export function StudentProfile() {
       program: "",
       yearLevel: "",
       section: "",
-      courseCodes: [],
       dateOfBirth: "",
       sex: "Male",
       civilStatus: "Single",
@@ -144,6 +179,9 @@ export function StudentProfile() {
       address: "",
       emergencyContact: "",
       emergencyContactNumber: "",
+      nationality: "",
+      religion: "",
+      skills: "",
     });
   };
 
@@ -162,18 +200,6 @@ export function StudentProfile() {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  const handleCourseToggle = (subjectCode: string) => {
-    setFormData((prev) => {
-      const exists = prev.courseCodes.includes(subjectCode);
-      return {
-        ...prev,
-        courseCodes: exists
-          ? prev.courseCodes.filter((code) => code !== subjectCode)
-          : [...prev.courseCodes, subjectCode],
-      };
-    });
-  };
-
   return (
     <div className="min-h-screen bg-gray-50 p-8">
       <div className="max-w-7xl mx-auto">
@@ -189,16 +215,52 @@ export function StudentProfile() {
 
         {/* Actions Bar */}
         <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-200 mb-6">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search by name or student ID..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-              />
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex-1 space-y-3">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Search by name or student ID..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+                <input
+                  type="text"
+                  placeholder="Filter by skill (e.g., Basketball)"
+                  value={skillFilter}
+                  onChange={(e) => setSkillFilter(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSkillFilter("Basketball")}
+                  className="rounded-full bg-orange-100 px-3 py-1 text-xs font-semibold text-orange-700 hover:bg-orange-200"
+                >
+                  Basketball
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSkillFilter("Programming")}
+                  className="rounded-full bg-orange-100 px-3 py-1 text-xs font-semibold text-orange-700 hover:bg-orange-200"
+                >
+                  Programming
+                </button>
+                {skillFilter && (
+                  <button
+                    type="button"
+                    onClick={() => setSkillFilter("")}
+                    className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-200"
+                  >
+                    Clear Skill Filter
+                  </button>
+                )}
+              </div>
             </div>
             <button 
               onClick={() => setShowAddModal(true)}
@@ -232,6 +294,9 @@ export function StudentProfile() {
                     Contact
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                    Skills
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
                     Actions
                   </th>
                 </tr>
@@ -253,6 +318,9 @@ export function StudentProfile() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                       {student.contactNumber}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-700 max-w-[220px]">
+                      <p className="truncate">{student.skills || '-'}</p>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                       <div className="flex items-center gap-2">
@@ -283,7 +351,7 @@ export function StudentProfile() {
 
       {/* View Modal */}
       {showModal && selectedStudent && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black bg-opacity-50 p-4 py-6">
           <div className="bg-white rounded-lg max-w-3xl w-full p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-bold text-gray-900">Student Details</h2>
@@ -351,6 +419,18 @@ export function StudentProfile() {
                 <label className="text-sm font-semibold text-gray-600">Emergency Contact Number</label>
                 <p className="text-gray-900 mt-1">{selectedStudent.emergencyContactNumber}</p>
               </div>
+              <div>
+                <label className="text-sm font-semibold text-gray-600">Nationality</label>
+                <p className="text-gray-900 mt-1">{selectedStudent.nationality || '-'}</p>
+              </div>
+              <div>
+                <label className="text-sm font-semibold text-gray-600">Religion</label>
+                <p className="text-gray-900 mt-1">{selectedStudent.religion || '-'}</p>
+              </div>
+              <div className="col-span-2">
+                <label className="text-sm font-semibold text-gray-600">Skills</label>
+                <p className="text-gray-900 mt-1">{selectedStudent.skills || '-'}</p>
+              </div>
             </div>
           </div>
         </div>
@@ -358,7 +438,7 @@ export function StudentProfile() {
 
       {/* Add Student Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black bg-opacity-50 p-4 py-6">
           <div className="bg-white rounded-lg max-w-3xl w-full p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-bold text-gray-900">Add New Student</h2>
@@ -369,6 +449,11 @@ export function StudentProfile() {
                 <X className="w-6 h-6" />
               </button>
             </div>
+            {submitError && (
+              <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {submitError}
+              </div>
+            )}
             <form onSubmit={(e) => { e.preventDefault(); handleAddStudent(); }} className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Student ID *</label>
@@ -434,14 +519,14 @@ export function StudentProfile() {
                   <option value="4">4</option>
                 </select>
               </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Section</label>
+              <div className="col-span-2">
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Skills</label>
                 <input
                   type="text"
-                  value={formData.section}
-                  onChange={(e) => handleInputChange("section", e.target.value)}
+                  value={formData.skills}
+                  onChange={(e) => handleInputChange("skills", e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  placeholder="e.g., CS-2A"
+                  placeholder="e.g., Basketball, Programming, Public Speaking"
                 />
               </div>
               <div>
@@ -523,27 +608,6 @@ export function StudentProfile() {
                   placeholder="Full Name"
                 />
               </div>
-              <div className="col-span-2">
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Assigned Courses</label>
-                <div className="max-h-44 overflow-y-auto rounded-lg border border-gray-300 p-3">
-                  {subjects.length === 0 && (
-                    <p className="text-sm text-gray-500">No subjects found. Add subjects first.</p>
-                  )}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    {subjects.map((subject) => (
-                      <label key={subject.subject_code} className="flex items-start gap-2 text-sm text-gray-700">
-                        <input
-                          type="checkbox"
-                          checked={formData.courseCodes.includes(subject.subject_code)}
-                          onChange={() => handleCourseToggle(subject.subject_code)}
-                          className="mt-0.5"
-                        />
-                        <span>{subject.subject_code} - {subject.subject_name}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Emergency Contact Number *</label>
                 <input
@@ -554,6 +618,30 @@ export function StudentProfile() {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
                   placeholder="+63 912 345 6789"
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Nationality</label>
+                <input
+                  type="text"
+                  value={formData.nationality}
+                  onChange={(e) => handleInputChange("nationality", e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  placeholder="e.g., Filipino"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Religion</label>
+                <input
+                  type="text"
+                  value={formData.religion}
+                  onChange={(e) => handleInputChange("religion", e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  placeholder="e.g., Roman Catholic"
+                />
+              </div>
+              <div className="col-span-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-800">
+                <p>Auto-generated password: {(formData.lastName?.trim()?.[0] || 'X').toUpperCase()}{formData.dateOfBirth || 'YYYY-MM-DD'}</p>
+                <p className="mt-1 text-xs">Temporary password only. Require account owner to change password after first login.</p>
               </div>
               <div className="col-span-2 flex gap-3 mt-4">
                 <button

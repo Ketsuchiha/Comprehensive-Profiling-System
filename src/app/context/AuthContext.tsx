@@ -34,14 +34,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (email: string, password: string): Promise<boolean> => {
     try {
-      const data = await api.post<{ user: { user_id: number; username: string; user_type: string; ref_id: string } }>('/auth/login', {
+      const data = await api.post<{ user: { user_id: number; username: string; user_type: string; ref_id: string; display_name?: string } }>('/auth/login', {
         username: email,
         password,
       });
       const userData: User = {
         id: String(data.user.user_id),
         email: data.user.username,
-        name: data.user.username,
+        name: data.user.display_name || data.user.username,
         role: data.user.user_type,
         refId: data.user.ref_id,
       };
