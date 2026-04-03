@@ -1,4 +1,4 @@
-import { Outlet, Link, useLocation } from "react-router";
+import { Outlet, Link, useLocation, useNavigate } from "react-router";
 import { 
   LayoutDashboard, 
   User, 
@@ -10,10 +10,27 @@ import {
   LogOut
 } from "lucide-react";
 import { useState } from "react";
+import { useAuth } from "../context/AuthContext";
 
 export default function Layout() {
   const location = useLocation();
+  const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const { user, logout } = useAuth();
+
+  const displayName = user?.username || "Student";
+  const displayRefId = user?.refId || "N/A";
+  const initials = displayName
+    .split(/[\s.@_-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((token) => token[0]?.toUpperCase() || "")
+    .join("") || "ST";
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
 
   const navigation = [
     { name: "Dashboard", href: "/", icon: LayoutDashboard },
@@ -70,14 +87,14 @@ export default function Layout() {
               <li className="mt-auto">
                 <div className="flex items-center gap-3 px-3 py-3 border-t border-gray-200">
                   <div className="w-10 h-10 rounded-full bg-gradient-to-br from-pink-400 to-purple-500 flex items-center justify-center">
-                    <span className="text-white font-medium text-sm">MD</span>
+                    <span className="text-white font-medium text-sm">{initials}</span>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">Maria Cruz</p>
-                    <p className="text-xs text-gray-500">2024-00123</p>
+                      <p className="text-sm font-medium text-gray-900 truncate">{displayName}</p>
+                      <p className="text-xs text-gray-500">{displayRefId}</p>
                   </div>
                 </div>
-                <button className="flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg w-full mt-2">
+                  <button onClick={handleLogout} className="flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg w-full mt-2">
                   <LogOut className="h-4 w-4" />
                   Logout
                 </button>
@@ -147,6 +164,13 @@ export default function Layout() {
                     );
                   })}
                 </ul>
+                <button
+                  onClick={handleLogout}
+                  className="mt-6 flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+                >
+                  <LogOut className="h-4 w-4" />
+                  Logout
+                </button>
               </nav>
             </div>
           </div>
