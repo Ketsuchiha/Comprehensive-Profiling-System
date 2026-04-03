@@ -46,8 +46,41 @@ router.post('/login', async (req, res) => {
 
     await pool.query('UPDATE users SET last_login = NOW() WHERE user_id = ?', [user.user_id]);
 
+    let displayName = user.username;
+    if (user.user_type === 'Faculty') {
+      const [facultyRows] = await pool.query(
+        'SELECT first_name, middle_name, last_name FROM faculty WHERE faculty_id = ? LIMIT 1',
+        [user.ref_id]
+      );
+      if (facultyRows.length > 0) {
+        const faculty = facultyRows[0];
+        displayName = [faculty.first_name, faculty.middle_name, faculty.last_name]
+          .filter(Boolean)
+          .join(' ')
+          .trim() || displayName;
+      }
+    } else if (user.user_type === 'Student') {
+      const [studentRows] = await pool.query(
+        'SELECT first_name, middle_name, last_name FROM students WHERE student_id = ? LIMIT 1',
+        [user.ref_id]
+      );
+      if (studentRows.length > 0) {
+        const student = studentRows[0];
+        displayName = [student.first_name, student.middle_name, student.last_name]
+          .filter(Boolean)
+          .join(' ')
+          .trim() || displayName;
+      }
+    }
+
     const { password_hash, ...userInfo } = user;
-    res.json({ message: 'Login successful', user: userInfo });
+    res.json({
+      message: 'Login successful',
+      user: {
+        ...userInfo,
+        display_name: displayName,
+      },
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -1,9 +1,11 @@
 const express = require('express');
 const router = express.Router();
+const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const pool = require('../config/db');
+const { isFacultyQualifiedForSubject } = require('../utils/expertiseMatch');
 
 function decodeBase64File(data) {
   if (!data || typeof data !== 'string') return null;
@@ -11,9 +13,122 @@ function decodeBase64File(data) {
   return Buffer.from(base64, 'base64');
 }
 
+function normalizeDateInput(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return null;
+  return trimmed;
+}
+
+function generateDefaultPassword(lastName, birthDate) {
+  const initial = (typeof lastName === 'string' && lastName.trim())
+    ? lastName.trim().charAt(0).toUpperCase()
+    : 'X';
+  return `${initial}${birthDate}`;
+}
+
+function isBlank(value) {
+  return value == null || (typeof value === 'string' && value.trim() === '');
+}
+
+function isMissingTableError(err) {
+  return err && err.code === 'ER_NO_SUCH_TABLE';
+}
+
+function normalizeOptionalString(value, { toLower = false } = {}) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return toLower ? trimmed.toLowerCase() : trimmed;
+}
+
+function normalizeOptionalInteger(value, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
+  if (value === undefined || value === null || value === '') return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  const normalized = Math.floor(parsed);
+  if (normalized < min || normalized > max) return null;
+  return normalized;
+}
+
+function calculateAgeFromBirthDate(dateValue) {
+  if (!dateValue) return null;
+  const birthDate = new Date(`${dateValue}T00:00:00`);
+  if (Number.isNaN(birthDate.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDiff = today.getMonth() - birthDate.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+    age -= 1;
+  }
+  return age >= 0 ? age : null;
+}
+
+function calculateYearsSinceDate(dateValue) {
+  if (!dateValue) return null;
+  const referenceDate = new Date(`${dateValue}T00:00:00`);
+  if (Number.isNaN(referenceDate.getTime())) return null;
+  const today = new Date();
+  let years = today.getFullYear() - referenceDate.getFullYear();
+  const monthDiff = today.getMonth() - referenceDate.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < referenceDate.getDate())) {
+    years -= 1;
+  }
+  return years >= 0 ? years : 0;
+}
+
 async function hasFacultyCertificationTable() {
   const [rows] = await pool.query("SHOW TABLES LIKE 'faculty_expertise_certifications'");
   return rows.length > 0;
+}
+
+async function getFacultyExpertiseValues(facultyId, specialization) {
+  const expertiseValues = [];
+  if (typeof specialization === 'string' && specialization.trim()) {
+    expertiseValues.push(specialization.trim());
+  }
+
+  try {
+    const [rows] = await pool.query(
+      'SELECT expertise FROM faculty_expertise_certifications WHERE faculty_id = ?',
+      [facultyId]
+    );
+    rows.forEach((row) => {
+      if (typeof row.expertise === 'string' && row.expertise.trim()) {
+        expertiseValues.push(row.expertise.trim());
+      }
+    });
+  } catch (err) {
+    if (!isMissingTableError(err)) throw err;
+  }
+
+  return expertiseValues;
+}
+
+async function assertFacultyExpertiseMatch(facultyId, subjectCode, specialization) {
+  const [subjectRows] = await pool.query(
+    'SELECT subject_name FROM subjects WHERE subject_code = ? LIMIT 1',
+    [subjectCode]
+  );
+  if (subjectRows.length === 0) {
+    const err = new Error('Subject code does not exist. Create/select a valid subject first.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const expertiseValues = await getFacultyExpertiseValues(facultyId, specialization);
+  if (expertiseValues.length === 0) {
+    const err = new Error('Faculty has no specialization/expertise record. Add specialization or upload expertise certificates first.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const subjectName = subjectRows[0].subject_name;
+  if (!isFacultyQualifiedForSubject(subjectName, expertiseValues)) {
+    const err = new Error(`Faculty expertise does not match subject ${subjectCode} (${subjectName}). Assign a faculty member with matching expertise.`);
+    err.statusCode = 400;
+    throw err;
+  }
 }
 
 // ─── FACULTY CRUD ───────────────────────────────────────────────
@@ -119,12 +234,31 @@ router.post('/', async (req, res) => {
     const {
       faculty_id, first_name, middle_name, last_name, birth_date, gender,
       email, contact_no, address, profile_photo, specialization,
+      age, work_experience_years, expertise_certificate_path,
       employment, rank, certification
     } = req.body;
 
-    if (!first_name || !last_name || !email) {
-      return res.status(400).json({ error: 'first_name, last_name, and email are required' });
+    const missingRequired = [];
+    if (isBlank(first_name)) missingRequired.push('first_name');
+    if (isBlank(last_name)) missingRequired.push('last_name');
+    if (isBlank(birth_date)) missingRequired.push('birth_date');
+    if (isBlank(gender)) missingRequired.push('gender');
+    if (isBlank(email)) missingRequired.push('email');
+    if (isBlank(contact_no)) missingRequired.push('contact_no');
+    if (isBlank(address)) missingRequired.push('address');
+
+    if (missingRequired.length > 0) {
+      return res.status(400).json({ error: `Missing required fields: ${missingRequired.join(', ')}` });
     }
+
+    const normalizedBirthDate = normalizeDateInput(birth_date);
+    if (!normalizedBirthDate) {
+      return res.status(400).json({ error: 'A valid birth_date is required' });
+    }
+
+    const normalizedAge = normalizeOptionalInteger(age, { min: 1, max: 120 }) ?? calculateAgeFromBirthDate(normalizedBirthDate);
+    const normalizedWorkExperienceYears = normalizeOptionalInteger(work_experience_years, { min: 0, max: 80 });
+    const normalizedExpertiseCertificatePath = normalizeOptionalString(expertise_certificate_path);
 
     let generatedFacultyId = faculty_id || `F${crypto.randomUUID().replace(/-/g, '').slice(0, 19)}`;
     if (!faculty_id) {
@@ -138,11 +272,47 @@ router.post('/', async (req, res) => {
 
     await pool.query(
       `INSERT INTO faculty (faculty_id, first_name, middle_name, last_name, birth_date, gender,
-        email, contact_no, address, profile_photo, specialization)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [generatedFacultyId, first_name, middle_name || null, last_name, birth_date || '2000-01-01', gender || 'Unknown',
-       email, contact_no || '', address || '', profile_photo || null, specialization || null]
+        age, email, contact_no, address, profile_photo, specialization,
+        work_experience_years, expertise_certificate_path)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        generatedFacultyId,
+        first_name.trim(),
+        normalizeOptionalString(middle_name),
+        last_name.trim(),
+        normalizedBirthDate,
+        gender.trim(),
+        normalizedAge,
+        normalizeOptionalString(email, { toLower: true }),
+        contact_no.trim(),
+        address.trim(),
+        normalizeOptionalString(profile_photo),
+        normalizeOptionalString(specialization),
+        normalizedWorkExperienceYears,
+        normalizedExpertiseCertificatePath,
+      ]
     );
+
+    try {
+      const username = normalizeOptionalString(email, { toLower: true });
+      const generatedPassword = generateDefaultPassword(last_name, normalizedBirthDate);
+      const salt = await bcrypt.genSalt(10);
+      const password_hash = await bcrypt.hash(generatedPassword, salt);
+
+      await pool.query(
+        `INSERT INTO users (ref_id, user_type, username, password_hash)
+         VALUES (?, 'Faculty', ?, ?)
+         ON DUPLICATE KEY UPDATE
+           user_type = VALUES(user_type),
+           username = VALUES(username),
+           password_hash = VALUES(password_hash),
+           is_active = 1`,
+        [generatedFacultyId, username, password_hash]
+      );
+    } catch (userErr) {
+      await pool.query('DELETE FROM faculty WHERE faculty_id = ?', [generatedFacultyId]);
+      throw new Error(`Faculty record rollback: failed to create user credentials (${userErr.message})`);
+    }
 
     if (employment || resolvedRank) {
       await pool.query(
@@ -160,6 +330,7 @@ router.post('/', async (req, res) => {
     }
 
     let warning;
+    let resolvedCertificatePath = normalizedExpertiseCertificatePath;
     if (certification?.file_data_base64 && certification?.file_name && certification?.expertise) {
       const hasCertTable = await hasFacultyCertificationTable();
       if (!hasCertTable) {
@@ -178,6 +349,7 @@ router.post('/', async (req, res) => {
         const storedFilename = `${generatedFacultyId}-${Date.now()}${safeExt}`;
         const filePath = path.join(uploadsDir, storedFilename);
         fs.writeFileSync(filePath, fileBuffer);
+        resolvedCertificatePath = `/uploads/faculty-certificates/${storedFilename}`;
 
         await pool.query(
           `INSERT INTO faculty_expertise_certifications (faculty_id, expertise, certificate_file, mime_type)
@@ -185,11 +357,19 @@ router.post('/', async (req, res) => {
           [
             generatedFacultyId,
             certification.expertise,
-            `/uploads/faculty-certificates/${storedFilename}`,
+            resolvedCertificatePath,
             certification.mime_type || 'application/pdf',
           ]
         );
       }
+    }
+
+    if (resolvedCertificatePath) {
+      await pool.query(
+        `UPDATE faculty SET expertise_certificate_path = ?, updated_at = NOW()
+         WHERE faculty_id = ?`,
+        [resolvedCertificatePath, generatedFacultyId]
+      );
     }
 
     res.status(201).json({ message: 'Faculty created successfully', faculty_id: generatedFacultyId, warning });
@@ -207,18 +387,78 @@ router.put('/:id', async (req, res) => {
     const { id } = req.params;
     const {
       first_name, middle_name, last_name, birth_date, gender,
-      email, contact_no, address, profile_photo, specialization
+      email, contact_no, address, profile_photo, specialization,
+      age, work_experience_years, expertise_certificate_path
     } = req.body;
+
+    const blankRequiredOnUpdate = [];
+    if (first_name !== undefined && isBlank(first_name)) blankRequiredOnUpdate.push('first_name');
+    if (last_name !== undefined && isBlank(last_name)) blankRequiredOnUpdate.push('last_name');
+    if (gender !== undefined && isBlank(gender)) blankRequiredOnUpdate.push('gender');
+    if (email !== undefined && isBlank(email)) blankRequiredOnUpdate.push('email');
+    if (contact_no !== undefined && isBlank(contact_no)) blankRequiredOnUpdate.push('contact_no');
+    if (address !== undefined && isBlank(address)) blankRequiredOnUpdate.push('address');
+
+    if (blankRequiredOnUpdate.length > 0) {
+      return res.status(400).json({ error: `These fields cannot be empty: ${blankRequiredOnUpdate.join(', ')}` });
+    }
+
+    let normalizedBirthDate = birth_date;
+    if (birth_date !== undefined && birth_date !== null) {
+      normalizedBirthDate = normalizeDateInput(birth_date);
+      if (!normalizedBirthDate) {
+        return res.status(400).json({ error: 'birth_date must be in YYYY-MM-DD format' });
+      }
+    }
+
+    let normalizedAge = age;
+    if (age !== undefined) {
+      const parsedAge = normalizeOptionalInteger(age, { min: 1, max: 120 });
+      if (parsedAge === null && age !== null && age !== '') {
+        return res.status(400).json({ error: 'age must be a valid integer between 1 and 120' });
+      }
+      normalizedAge = parsedAge;
+    } else if (normalizedBirthDate) {
+      normalizedAge = calculateAgeFromBirthDate(normalizedBirthDate);
+    }
+
+    let normalizedWorkExperienceYears = work_experience_years;
+    if (work_experience_years !== undefined) {
+      const parsedWorkExperienceYears = normalizeOptionalInteger(work_experience_years, { min: 0, max: 80 });
+      if (parsedWorkExperienceYears === null && work_experience_years !== null && work_experience_years !== '') {
+        return res.status(400).json({ error: 'work_experience_years must be a valid integer between 0 and 80' });
+      }
+      normalizedWorkExperienceYears = parsedWorkExperienceYears;
+    }
 
     const [result] = await pool.query(
       `UPDATE faculty SET first_name = COALESCE(?, first_name), middle_name = COALESCE(?, middle_name),
-        last_name = COALESCE(?, last_name), birth_date = COALESCE(?, birth_date), gender = COALESCE(?, gender),
+        last_name = COALESCE(?, last_name), birth_date = COALESCE(?, birth_date), age = COALESCE(?, age),
+        gender = COALESCE(?, gender),
         email = COALESCE(?, email), contact_no = COALESCE(?, contact_no), address = COALESCE(?, address),
         profile_photo = COALESCE(?, profile_photo), specialization = COALESCE(?, specialization),
+        work_experience_years = COALESCE(?, work_experience_years),
+        expertise_certificate_path = COALESCE(?, expertise_certificate_path),
         updated_at = NOW()
        WHERE faculty_id = ?`,
-      [first_name, middle_name, last_name, birth_date, gender, email, contact_no, address,
-       profile_photo, specialization, id]
+      [
+        typeof first_name === 'string' ? first_name.trim() : first_name,
+        typeof middle_name === 'string' ? middle_name.trim() : middle_name,
+        typeof last_name === 'string' ? last_name.trim() : last_name,
+        normalizedBirthDate,
+        normalizedAge,
+        typeof gender === 'string' ? gender.trim() : gender,
+        typeof email === 'string' ? email.trim().toLowerCase() : email,
+        typeof contact_no === 'string' ? contact_no.trim() : contact_no,
+        typeof address === 'string' ? address.trim() : address,
+        typeof profile_photo === 'string' ? profile_photo.trim() : profile_photo,
+        typeof specialization === 'string' ? specialization.trim() : specialization,
+        normalizedWorkExperienceYears,
+        typeof expertise_certificate_path === 'string'
+          ? expertise_certificate_path.trim() || null
+          : expertise_certificate_path,
+        id,
+      ]
     );
 
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Faculty not found' });
@@ -289,11 +529,18 @@ router.post('/:id/certifications', async (req, res) => {
     const safeExt = ext === '.pdf' ? ext : '.pdf';
     const storedFilename = `${id}-${Date.now()}${safeExt}`;
     fs.writeFileSync(path.join(uploadsDir, storedFilename), fileBuffer);
+    const certificatePath = `/uploads/faculty-certificates/${storedFilename}`;
 
     const [result] = await pool.query(
       `INSERT INTO faculty_expertise_certifications (faculty_id, expertise, certificate_file, mime_type)
        VALUES (?, ?, ?, ?)`,
-      [id, expertise, `/uploads/faculty-certificates/${storedFilename}`, mime_type || 'application/pdf']
+      [id, expertise, certificatePath, mime_type || 'application/pdf']
+    );
+
+    await pool.query(
+      `UPDATE faculty SET expertise_certificate_path = ?, updated_at = NOW()
+       WHERE faculty_id = ?`,
+      [certificatePath, id]
     );
 
     res.status(201).json({ message: 'Certification uploaded', cert_id: result.insertId });
@@ -400,6 +647,17 @@ router.put('/:id/employment', async (req, res) => {
         [employment_status, rank, department_id, date_hired, tenure_status, id]
       );
     }
+
+    const normalizedDateHired = normalizeDateInput(date_hired);
+    if (normalizedDateHired) {
+      const computedWorkExperienceYears = calculateYearsSinceDate(normalizedDateHired);
+      await pool.query(
+        `UPDATE faculty SET work_experience_years = COALESCE(?, work_experience_years), updated_at = NOW()
+         WHERE faculty_id = ?`,
+        [computedWorkExperienceYears, id]
+      );
+    }
+
     res.json({ message: 'Employment updated successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -571,6 +829,20 @@ router.post('/:id/load', async (req, res) => {
     const { id } = req.params;
     const { subject_code, section, semester, academic_year, teaching_units } = req.body;
 
+    if (isBlank(subject_code)) {
+      return res.status(400).json({ error: 'subject_code is required' });
+    }
+
+    const [facultyRows] = await pool.query(
+      'SELECT faculty_id, specialization FROM faculty WHERE faculty_id = ? LIMIT 1',
+      [id]
+    );
+    if (facultyRows.length === 0) {
+      return res.status(404).json({ error: 'Faculty not found' });
+    }
+
+    await assertFacultyExpertiseMatch(id, subject_code, facultyRows[0].specialization || '');
+
     const [result] = await pool.query(
       `INSERT INTO faculty_load (faculty_id, subject_code, section, semester, academic_year, teaching_units)
        VALUES (?, ?, ?, ?, ?, ?)`,
@@ -579,6 +851,9 @@ router.post('/:id/load', async (req, res) => {
 
     res.status(201).json({ message: 'Load added', load_id: result.insertId });
   } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
     res.status(500).json({ error: err.message });
   }
 });
@@ -588,6 +863,27 @@ router.put('/load/:loadId', async (req, res) => {
   try {
     const { loadId } = req.params;
     const { subject_code, section, semester, academic_year, teaching_units } = req.body;
+
+    const [existingLoadRows] = await pool.query(
+      'SELECT faculty_id, subject_code FROM faculty_load WHERE load_id = ? LIMIT 1',
+      [loadId]
+    );
+    if (existingLoadRows.length === 0) {
+      return res.status(404).json({ error: 'Load not found' });
+    }
+
+    const resolvedFacultyId = existingLoadRows[0].faculty_id;
+    const resolvedSubjectCode = isBlank(subject_code) ? existingLoadRows[0].subject_code : subject_code;
+
+    const [facultyRows] = await pool.query(
+      'SELECT faculty_id, specialization FROM faculty WHERE faculty_id = ? LIMIT 1',
+      [resolvedFacultyId]
+    );
+    if (facultyRows.length === 0) {
+      return res.status(400).json({ error: 'Associated faculty record not found for this load item.' });
+    }
+
+    await assertFacultyExpertiseMatch(resolvedFacultyId, resolvedSubjectCode, facultyRows[0].specialization || '');
 
     const [result] = await pool.query(
       `UPDATE faculty_load SET subject_code = COALESCE(?, subject_code), section = COALESCE(?, section),
@@ -600,6 +896,9 @@ router.put('/load/:loadId', async (req, res) => {
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Load not found' });
     res.json({ message: 'Load updated successfully' });
   } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
     res.status(500).json({ error: err.message });
   }
 });

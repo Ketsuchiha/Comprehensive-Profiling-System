@@ -1,9 +1,35 @@
 const express = require('express');
 const router = express.Router();
+const bcrypt = require('bcryptjs');
 const pool = require('../config/db');
 
 function isMissingTableError(err) {
   return err && err.code === 'ER_NO_SUCH_TABLE';
+}
+
+function normalizeDateInput(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return null;
+  return trimmed;
+}
+
+function generateDefaultPassword(lastName, birthDate) {
+  const initial = (typeof lastName === 'string' && lastName.trim())
+    ? lastName.trim().charAt(0).toUpperCase()
+    : 'X';
+  return `${initial}${birthDate}`;
+}
+
+function isBlank(value) {
+  return value == null || (typeof value === 'string' && value.trim() === '');
+}
+
+function normalizeOptionalString(value, { toLower = false } = {}) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return toLower ? trimmed.toLowerCase() : trimmed;
 }
 
 // ─── STUDENTS CRUD ──────────────────────────────────────────────
@@ -120,24 +146,76 @@ router.post('/', async (req, res) => {
     const {
       student_id, first_name, middle_name, last_name, birth_date, sex,
       civil_status, contact_number, email, address, emergency_contact,
-      emergency_contact_num, profile_photo, nationality, religion,
+      emergency_contact_num, profile_photo, nationality, religion, skills,
       academic, course_codes
     } = req.body;
 
-    if (!student_id || !first_name || !last_name) {
-      return res.status(400).json({ error: 'student_id, first_name, and last_name are required' });
+    const missingRequired = [];
+    if (isBlank(student_id)) missingRequired.push('student_id');
+    if (isBlank(first_name)) missingRequired.push('first_name');
+    if (isBlank(last_name)) missingRequired.push('last_name');
+    if (isBlank(birth_date)) missingRequired.push('birth_date');
+    if (isBlank(sex)) missingRequired.push('sex');
+    if (isBlank(contact_number)) missingRequired.push('contact_number');
+    if (isBlank(email)) missingRequired.push('email');
+    if (isBlank(address)) missingRequired.push('address');
+    if (isBlank(emergency_contact)) missingRequired.push('emergency_contact');
+    if (isBlank(emergency_contact_num)) missingRequired.push('emergency_contact_num');
+
+    if (missingRequired.length > 0) {
+      return res.status(400).json({ error: `Missing required fields: ${missingRequired.join(', ')}` });
+    }
+
+    const normalizedBirthDate = normalizeDateInput(birth_date);
+    if (!normalizedBirthDate) {
+      return res.status(400).json({ error: 'A valid birth_date is required' });
     }
 
     await pool.query(
       `INSERT INTO students (student_id, first_name, middle_name, last_name, birth_date, sex,
         civil_status, contact_number, email, address, emergency_contact,
-        emergency_contact_num, profile_photo, nationality, religion)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [student_id, first_name, middle_name || null, last_name, birth_date || null, sex || null,
-       civil_status || null, contact_number || null, email || null, address || null,
-       emergency_contact || null, emergency_contact_num || null, profile_photo || null,
-       nationality || null, religion || null]
+        emergency_contact_num, profile_photo, nationality, religion, skills)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        student_id.trim(),
+        first_name.trim(),
+        normalizeOptionalString(middle_name),
+        last_name.trim(),
+        normalizedBirthDate,
+        sex.trim(),
+        normalizeOptionalString(civil_status),
+        contact_number.trim(),
+        normalizeOptionalString(email, { toLower: true }),
+        address.trim(),
+        emergency_contact.trim(),
+        emergency_contact_num.trim(),
+        normalizeOptionalString(profile_photo),
+        normalizeOptionalString(nationality),
+        normalizeOptionalString(religion),
+        normalizeOptionalString(skills),
+      ]
     );
+
+    try {
+      const username = normalizeOptionalString(email, { toLower: true }) || student_id.trim();
+      const generatedPassword = generateDefaultPassword(last_name, normalizedBirthDate);
+      const salt = await bcrypt.genSalt(10);
+      const password_hash = await bcrypt.hash(generatedPassword, salt);
+
+      await pool.query(
+        `INSERT INTO users (ref_id, user_type, username, password_hash)
+         VALUES (?, 'Student', ?, ?)
+         ON DUPLICATE KEY UPDATE
+           user_type = VALUES(user_type),
+           username = VALUES(username),
+           password_hash = VALUES(password_hash),
+           is_active = 1`,
+        [student_id, username, password_hash]
+      );
+    } catch (userErr) {
+      await pool.query('DELETE FROM students WHERE student_id = ?', [student_id]);
+      throw new Error(`Student record rollback: failed to create user credentials (${userErr.message})`);
+    }
 
     if (academic) {
       await pool.query(
@@ -223,8 +301,30 @@ router.put('/:id', async (req, res) => {
     const {
       first_name, middle_name, last_name, birth_date, sex, civil_status,
       contact_number, email, address, emergency_contact, emergency_contact_num,
-      profile_photo, nationality, religion
+      profile_photo, nationality, religion, skills
     } = req.body;
+
+    const blankRequiredOnUpdate = [];
+    if (first_name !== undefined && isBlank(first_name)) blankRequiredOnUpdate.push('first_name');
+    if (last_name !== undefined && isBlank(last_name)) blankRequiredOnUpdate.push('last_name');
+    if (sex !== undefined && isBlank(sex)) blankRequiredOnUpdate.push('sex');
+    if (contact_number !== undefined && isBlank(contact_number)) blankRequiredOnUpdate.push('contact_number');
+    if (email !== undefined && isBlank(email)) blankRequiredOnUpdate.push('email');
+    if (address !== undefined && isBlank(address)) blankRequiredOnUpdate.push('address');
+    if (emergency_contact !== undefined && isBlank(emergency_contact)) blankRequiredOnUpdate.push('emergency_contact');
+    if (emergency_contact_num !== undefined && isBlank(emergency_contact_num)) blankRequiredOnUpdate.push('emergency_contact_num');
+
+    if (blankRequiredOnUpdate.length > 0) {
+      return res.status(400).json({ error: `These fields cannot be empty: ${blankRequiredOnUpdate.join(', ')}` });
+    }
+
+    let normalizedBirthDate = birth_date;
+    if (birth_date !== undefined && birth_date !== null) {
+      normalizedBirthDate = normalizeDateInput(birth_date);
+      if (!normalizedBirthDate) {
+        return res.status(400).json({ error: 'birth_date must be in YYYY-MM-DD format' });
+      }
+    }
 
     const [result] = await pool.query(
       `UPDATE students SET first_name = COALESCE(?, first_name), middle_name = COALESCE(?, middle_name),
@@ -234,11 +334,26 @@ router.put('/:id', async (req, res) => {
         emergency_contact = COALESCE(?, emergency_contact),
         emergency_contact_num = COALESCE(?, emergency_contact_num),
         profile_photo = COALESCE(?, profile_photo), nationality = COALESCE(?, nationality),
-        religion = COALESCE(?, religion), updated_at = NOW()
+        religion = COALESCE(?, religion), skills = COALESCE(?, skills), updated_at = NOW()
        WHERE student_id = ?`,
-      [first_name, middle_name, last_name, birth_date, sex, civil_status,
-       contact_number, email, address, emergency_contact, emergency_contact_num,
-       profile_photo, nationality, religion, id]
+      [
+        typeof first_name === 'string' ? first_name.trim() : first_name,
+        typeof middle_name === 'string' ? middle_name.trim() : middle_name,
+        typeof last_name === 'string' ? last_name.trim() : last_name,
+        normalizedBirthDate,
+        typeof sex === 'string' ? sex.trim() : sex,
+        typeof civil_status === 'string' ? civil_status.trim() : civil_status,
+        typeof contact_number === 'string' ? contact_number.trim() : contact_number,
+        typeof email === 'string' ? email.trim().toLowerCase() : email,
+        typeof address === 'string' ? address.trim() : address,
+        typeof emergency_contact === 'string' ? emergency_contact.trim() : emergency_contact,
+        typeof emergency_contact_num === 'string' ? emergency_contact_num.trim() : emergency_contact_num,
+        typeof profile_photo === 'string' ? profile_photo.trim() : profile_photo,
+        typeof nationality === 'string' ? nationality.trim() : nationality,
+        typeof religion === 'string' ? religion.trim() : religion,
+        typeof skills === 'string' ? skills.trim() : skills,
+        id,
+      ]
     );
 
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Student not found' });

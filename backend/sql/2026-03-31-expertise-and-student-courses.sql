@@ -1,4 +1,4 @@
--- Run this migration on your MySQL database (for example: ccs113)
+-- Run this migration on your MySQL database (default: ccs113)
 
 USE ccs113;
 

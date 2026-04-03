@@ -1,5 +1,5 @@
 -- CCS Comprehensive Profiling System Database Schema
--- Database: ccs123
+-- Database: ccs113
 -- Compatible with MySQL/MariaDB
 
 SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
@@ -12,8 +12,8 @@ SET time_zone = "+00:00";
 /*!40101 SET NAMES utf8mb4 */;
 
 -- Create database if not exists
-CREATE DATABASE IF NOT EXISTS `ccs123` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
-USE `ccs123`;
+CREATE DATABASE IF NOT EXISTS `ccs113` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+USE `ccs113`;
 
 -- --------------------------------------------------------
 -- Table structure for table `departments`
@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS `students` (
   `profile_photo` varchar(255) DEFAULT NULL,
   `nationality` varchar(50) DEFAULT NULL,
   `religion` varchar(50) DEFAULT NULL,
+  `skills` text DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`student_id`),
@@ -109,6 +110,19 @@ CREATE TABLE IF NOT EXISTS `student_academic` (
   `admission_date` date DEFAULT NULL,
   PRIMARY KEY (`student_id`),
   CONSTRAINT `student_academic_ibfk_1` FOREIGN KEY (`student_id`) REFERENCES `students` (`student_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+-- Table structure for table `student_course_assignments`
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `student_course_assignments` (
+  `student_id` varchar(20) NOT NULL,
+  `subject_code` varchar(20) NOT NULL,
+  `assigned_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`student_id`, `subject_code`),
+  KEY `subject_code` (`subject_code`),
+  CONSTRAINT `student_course_assignments_ibfk_1` FOREIGN KEY (`student_id`) REFERENCES `students` (`student_id`) ON DELETE CASCADE,
+  CONSTRAINT `student_course_assignments_ibfk_2` FOREIGN KEY (`subject_code`) REFERENCES `subjects` (`subject_code`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
@@ -185,16 +199,34 @@ CREATE TABLE IF NOT EXISTS `faculty` (
   `middle_name` varchar(50) DEFAULT NULL,
   `last_name` varchar(50) NOT NULL,
   `birth_date` date NOT NULL,
+  `age` int(11) DEFAULT NULL,
   `gender` varchar(10) NOT NULL,
   `email` varchar(100) NOT NULL,
   `contact_no` varchar(15) NOT NULL,
   `address` text NOT NULL,
   `profile_photo` varchar(255) DEFAULT NULL,
   `specialization` varchar(150) DEFAULT NULL,
+  `work_experience_years` int(11) DEFAULT NULL,
+  `expertise_certificate_path` varchar(255) DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`faculty_id`),
   UNIQUE KEY `email` (`email`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+-- Table structure for table `faculty_expertise_certifications`
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `faculty_expertise_certifications` (
+  `cert_id` int(11) NOT NULL AUTO_INCREMENT,
+  `faculty_id` varchar(20) NOT NULL,
+  `expertise` varchar(150) NOT NULL,
+  `certificate_file` varchar(255) NOT NULL,
+  `mime_type` varchar(100) DEFAULT 'application/pdf',
+  `uploaded_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`cert_id`),
+  KEY `faculty_id` (`faculty_id`),
+  CONSTRAINT `faculty_expertise_certifications_ibfk_1` FOREIGN KEY (`faculty_id`) REFERENCES `faculty` (`faculty_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
