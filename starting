@@ -1,0 +1,11 @@
+-- running student side
+Set-Location "Student Side"; npm run dev
+
+Set-Location backend; npm run dev
+
+
+-- running admin 
+npm run dev
+
+--runing bakend 
+node server.js

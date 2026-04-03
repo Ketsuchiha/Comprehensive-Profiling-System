@@ -3,6 +3,7 @@ require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const express = require('express');
 const cors = require('cors');
+const pool = require('./config/db');
 
 const app = express();
 
@@ -31,8 +32,30 @@ app.use('/api/instruments', require('./routes/instruments'));
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+async function ensureStudentSkillsColumn() {
+  try {
+    const [rows] = await pool.query(
+      `SELECT 1
+       FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'students'
+         AND COLUMN_NAME = 'skills'
+       LIMIT 1`
+    );
+
+    if (rows.length === 0) {
+      await pool.query('ALTER TABLE students ADD COLUMN skills TEXT NULL AFTER religion');
+      console.log('Applied schema update: added students.skills column');
+    }
+  } catch (err) {
+    console.warn(`Schema check skipped: ${err.message}`);
+  }
+}
+
+ensureStudentSkillsColumn().finally(() => {
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
 });
 
 module.exports = app;

@@ -14,9 +14,9 @@ function normalizeDateInput(value) {
   return trimmed;
 }
 
-function generateDefaultPassword(lastName, birthDate) {
-  const initial = (typeof lastName === 'string' && lastName.trim())
-    ? lastName.trim().charAt(0).toUpperCase()
+function generateDefaultPassword(middleName, birthDate) {
+  const initial = (typeof middleName === 'string' && middleName.trim())
+    ? middleName.trim().charAt(0).toUpperCase()
     : 'X';
   return `${initial}${birthDate}`;
 }
@@ -30,6 +30,53 @@ function normalizeOptionalString(value, { toLower = false } = {}) {
   const trimmed = value.trim();
   if (!trimmed) return null;
   return toLower ? trimmed.toLowerCase() : trimmed;
+}
+
+let hasSkillsColumnCache = null;
+let hasPasswordColumnCache = null;
+
+async function hasStudentSkillsColumn() {
+  if (typeof hasSkillsColumnCache === 'boolean') {
+    return hasSkillsColumnCache;
+  }
+
+  try {
+    const [rows] = await pool.query(
+      `SELECT 1
+       FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'students'
+         AND COLUMN_NAME = 'skills'
+       LIMIT 1`
+    );
+    hasSkillsColumnCache = rows.length > 0;
+  } catch {
+    hasSkillsColumnCache = false;
+  }
+
+  return hasSkillsColumnCache;
+}
+
+async function hasStudentPasswordColumn() {
+  if (typeof hasPasswordColumnCache === 'boolean') {
+    return hasPasswordColumnCache;
+  }
+
+  try {
+    const [rows] = await pool.query(
+      `SELECT 1
+       FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'students'
+         AND COLUMN_NAME = 'password'
+       LIMIT 1`
+    );
+    hasPasswordColumnCache = rows.length > 0;
+  } catch {
+    hasPasswordColumnCache = false;
+  }
+
+  return hasPasswordColumnCache;
 }
 
 // ─── STUDENTS CRUD ──────────────────────────────────────────────
@@ -171,34 +218,63 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'A valid birth_date is required' });
     }
 
+    const generatedPassword = generateDefaultPassword(middle_name, normalizedBirthDate);
+
+    const includeSkillsColumn = await hasStudentSkillsColumn();
+    const includePasswordColumn = await hasStudentPasswordColumn();
+    const studentColumns = [
+      'student_id',
+      'first_name',
+      'middle_name',
+      'last_name',
+      'birth_date',
+      'sex',
+      'civil_status',
+      'contact_number',
+      'email',
+      'address',
+      'emergency_contact',
+      'emergency_contact_num',
+      'profile_photo',
+      'nationality',
+      'religion',
+    ];
+    const studentValues = [
+      student_id.trim(),
+      first_name.trim(),
+      normalizeOptionalString(middle_name),
+      last_name.trim(),
+      normalizedBirthDate,
+      sex.trim(),
+      normalizeOptionalString(civil_status),
+      contact_number.trim(),
+      normalizeOptionalString(email, { toLower: true }),
+      address.trim(),
+      emergency_contact.trim(),
+      emergency_contact_num.trim(),
+      normalizeOptionalString(profile_photo),
+      normalizeOptionalString(nationality),
+      normalizeOptionalString(religion),
+    ];
+
+    if (includeSkillsColumn) {
+      studentColumns.push('skills');
+      studentValues.push(normalizeOptionalString(skills));
+    }
+
+    if (includePasswordColumn) {
+      studentColumns.push('password');
+      studentValues.push(generatedPassword);
+    }
+
+    const placeholders = studentColumns.map(() => '?').join(', ');
     await pool.query(
-      `INSERT INTO students (student_id, first_name, middle_name, last_name, birth_date, sex,
-        civil_status, contact_number, email, address, emergency_contact,
-        emergency_contact_num, profile_photo, nationality, religion, skills)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        student_id.trim(),
-        first_name.trim(),
-        normalizeOptionalString(middle_name),
-        last_name.trim(),
-        normalizedBirthDate,
-        sex.trim(),
-        normalizeOptionalString(civil_status),
-        contact_number.trim(),
-        normalizeOptionalString(email, { toLower: true }),
-        address.trim(),
-        emergency_contact.trim(),
-        emergency_contact_num.trim(),
-        normalizeOptionalString(profile_photo),
-        normalizeOptionalString(nationality),
-        normalizeOptionalString(religion),
-        normalizeOptionalString(skills),
-      ]
+      `INSERT INTO students (${studentColumns.join(', ')}) VALUES (${placeholders})`,
+      studentValues
     );
 
     try {
       const username = normalizeOptionalString(email, { toLower: true }) || student_id.trim();
-      const generatedPassword = generateDefaultPassword(last_name, normalizedBirthDate);
       const salt = await bcrypt.genSalt(10);
       const password_hash = await bcrypt.hash(generatedPassword, salt);
 
@@ -326,34 +402,51 @@ router.put('/:id', async (req, res) => {
       }
     }
 
+    const includeSkillsColumn = await hasStudentSkillsColumn();
+    const updateClauses = [
+      'first_name = COALESCE(?, first_name)',
+      'middle_name = COALESCE(?, middle_name)',
+      'last_name = COALESCE(?, last_name)',
+      'birth_date = COALESCE(?, birth_date)',
+      'sex = COALESCE(?, sex)',
+      'civil_status = COALESCE(?, civil_status)',
+      'contact_number = COALESCE(?, contact_number)',
+      'email = COALESCE(?, email)',
+      'address = COALESCE(?, address)',
+      'emergency_contact = COALESCE(?, emergency_contact)',
+      'emergency_contact_num = COALESCE(?, emergency_contact_num)',
+      'profile_photo = COALESCE(?, profile_photo)',
+      'nationality = COALESCE(?, nationality)',
+      'religion = COALESCE(?, religion)',
+    ];
+    const updateValues = [
+      typeof first_name === 'string' ? first_name.trim() : first_name,
+      typeof middle_name === 'string' ? middle_name.trim() : middle_name,
+      typeof last_name === 'string' ? last_name.trim() : last_name,
+      normalizedBirthDate,
+      typeof sex === 'string' ? sex.trim() : sex,
+      typeof civil_status === 'string' ? civil_status.trim() : civil_status,
+      typeof contact_number === 'string' ? contact_number.trim() : contact_number,
+      typeof email === 'string' ? email.trim().toLowerCase() : email,
+      typeof address === 'string' ? address.trim() : address,
+      typeof emergency_contact === 'string' ? emergency_contact.trim() : emergency_contact,
+      typeof emergency_contact_num === 'string' ? emergency_contact_num.trim() : emergency_contact_num,
+      typeof profile_photo === 'string' ? profile_photo.trim() : profile_photo,
+      typeof nationality === 'string' ? nationality.trim() : nationality,
+      typeof religion === 'string' ? religion.trim() : religion,
+    ];
+
+    if (includeSkillsColumn) {
+      updateClauses.push('skills = COALESCE(?, skills)');
+      updateValues.push(typeof skills === 'string' ? skills.trim() : skills);
+    }
+
+    updateClauses.push('updated_at = NOW()');
+    updateValues.push(id);
+
     const [result] = await pool.query(
-      `UPDATE students SET first_name = COALESCE(?, first_name), middle_name = COALESCE(?, middle_name),
-        last_name = COALESCE(?, last_name), birth_date = COALESCE(?, birth_date), sex = COALESCE(?, sex),
-        civil_status = COALESCE(?, civil_status), contact_number = COALESCE(?, contact_number),
-        email = COALESCE(?, email), address = COALESCE(?, address),
-        emergency_contact = COALESCE(?, emergency_contact),
-        emergency_contact_num = COALESCE(?, emergency_contact_num),
-        profile_photo = COALESCE(?, profile_photo), nationality = COALESCE(?, nationality),
-        religion = COALESCE(?, religion), skills = COALESCE(?, skills), updated_at = NOW()
-       WHERE student_id = ?`,
-      [
-        typeof first_name === 'string' ? first_name.trim() : first_name,
-        typeof middle_name === 'string' ? middle_name.trim() : middle_name,
-        typeof last_name === 'string' ? last_name.trim() : last_name,
-        normalizedBirthDate,
-        typeof sex === 'string' ? sex.trim() : sex,
-        typeof civil_status === 'string' ? civil_status.trim() : civil_status,
-        typeof contact_number === 'string' ? contact_number.trim() : contact_number,
-        typeof email === 'string' ? email.trim().toLowerCase() : email,
-        typeof address === 'string' ? address.trim() : address,
-        typeof emergency_contact === 'string' ? emergency_contact.trim() : emergency_contact,
-        typeof emergency_contact_num === 'string' ? emergency_contact_num.trim() : emergency_contact_num,
-        typeof profile_photo === 'string' ? profile_photo.trim() : profile_photo,
-        typeof nationality === 'string' ? nationality.trim() : nationality,
-        typeof religion === 'string' ? religion.trim() : religion,
-        typeof skills === 'string' ? skills.trim() : skills,
-        id,
-      ]
+      `UPDATE students SET ${updateClauses.join(', ')} WHERE student_id = ?`,
+      updateValues
     );
 
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Student not found' });
