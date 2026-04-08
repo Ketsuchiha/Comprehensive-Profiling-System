@@ -5,12 +5,17 @@ import { api } from "../utils/api";
 interface Faculty {
   id: string;
   name: string;
+  firstName: string;
+  lastName: string;
   age: number;
   sex: string;
   email: string;
   position: string;
   expertise: string;
   yearsOfTeaching: number;
+  contactNumber: string;
+  address: string;
+  birthDate: string;
 }
 
 interface ExpertiseCertificateInput {
@@ -20,10 +25,15 @@ interface ExpertiseCertificateInput {
 }
 
 interface AddFacultyForm {
-  name: string;
+  firstName: string;
+  middleName: string;
+  lastName: string;
+  birthDate: string;
   age: number;
   sex: string;
   email: string;
+  contactNumber: string;
+  address: string;
   position: string;
   yearsOfTeaching: number;
 }
@@ -39,10 +49,15 @@ export function FacultyProfile() {
     { id: 1, expertise: '', file: null },
   ]);
   const [formData, setFormData] = useState<AddFacultyForm>({
-    name: "",
+    firstName: "",
+    middleName: "",
+    lastName: "",
+    birthDate: "",
     age: 0,
     sex: "Male",
     email: "",
+    contactNumber: "",
+    address: "",
     position: "Instructor",
     yearsOfTeaching: 0,
   });
@@ -71,12 +86,17 @@ export function FacultyProfile() {
         return {
           id: f.faculty_id,
           name,
+          firstName: f.first_name || '',
+          lastName: f.last_name || '',
           age,
           sex: f.gender || '',
           email: f.email || '',
           position: f.rank || f.employment_status || '',
           expertise: f.specialization || '',
           yearsOfTeaching,
+          contactNumber: f.contact_no || '',
+          address: f.address || '',
+          birthDate: f.birth_date ? String(f.birth_date).split('T')[0] : '',
         };
       }));
     } catch (err) {
@@ -98,10 +118,12 @@ export function FacultyProfile() {
 
   const handleAddFaculty = async () => {
     setSubmitError('');
-    const trimmedName = formData.name.trim();
-    const nameParts = trimmedName.split(/\s+/).filter(Boolean);
-    if (nameParts.length < 2) {
+    if (!formData.firstName.trim() || !formData.lastName.trim()) {
       setSubmitError('Please enter both first and last name.');
+      return;
+    }
+    if (!formData.birthDate) {
+      setSubmitError('Birth date is required.');
       return;
     }
 
@@ -125,14 +147,16 @@ export function FacultyProfile() {
     }
 
     try {
-      const firstName = nameParts[0] || '';
-      const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
       const specialization = preparedExpertise.map((entry) => entry.expertise).join(', ').slice(0, 150);
       const created = await api.post<{ faculty_id: string; warning?: string }>('/faculty', {
-        first_name: firstName,
-        last_name: lastName,
+        first_name: formData.firstName.trim(),
+        middle_name: formData.middleName.trim() || null,
+        last_name: formData.lastName.trim(),
+        birth_date: formData.birthDate,
         gender: formData.sex,
         email: formData.email,
+        contact_no: formData.contactNumber,
+        address: formData.address,
         rank: formData.position,
         specialization: specialization || null,
       });
@@ -156,10 +180,15 @@ export function FacultyProfile() {
       await fetchFaculty();
       setShowAddModal(false);
       setFormData({
-        name: "",
+        firstName: "",
+        middleName: "",
+        lastName: "",
+        birthDate: "",
         age: 0,
         sex: "Male",
         email: "",
+        contactNumber: "",
+        address: "",
         position: "Instructor",
         yearsOfTeaching: 0,
       });
@@ -323,12 +352,24 @@ export function FacultyProfile() {
                 </div>
               </div>
               <div>
+                <label className="text-sm font-semibold text-gray-600">Birth Date</label>
+                <p className="text-gray-900 mt-1">{selectedFaculty.birthDate || '-'}</p>
+              </div>
+              <div>
                 <label className="text-sm font-semibold text-gray-600">Age</label>
                 <p className="text-gray-900 mt-1">{selectedFaculty.age}</p>
               </div>
               <div>
                 <label className="text-sm font-semibold text-gray-600">Sex</label>
                 <p className="text-gray-900 mt-1">{selectedFaculty.sex}</p>
+              </div>
+              <div className="col-span-2">
+                <label className="text-sm font-semibold text-gray-600">Contact Number</label>
+                <p className="text-gray-900 mt-1">{selectedFaculty.contactNumber || '-'}</p>
+              </div>
+              <div className="col-span-2">
+                <label className="text-sm font-semibold text-gray-600">Address</label>
+                <p className="text-gray-900 mt-1">{selectedFaculty.address || '-'}</p>
               </div>
               <div className="col-span-2">
                 <label className="text-sm font-semibold text-gray-600">Email</label>
@@ -370,15 +411,43 @@ export function FacultyProfile() {
               </div>
             )}
             <form onSubmit={(e) => { e.preventDefault(); handleAddFaculty(); }} className="grid grid-cols-2 gap-4">
-              <div className="col-span-2">
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Full Name *</label>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">First Name *</label>
                 <input
                   type="text"
                   required
-                  value={formData.name}
-                  onChange={(e) => handleInputChange("name", e.target.value)}
+                  value={formData.firstName}
+                  onChange={(e) => handleInputChange("firstName", e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  placeholder="e.g., Dr. Juan dela Cruz"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Middle Name</label>
+                <input
+                  type="text"
+                  value={formData.middleName}
+                  onChange={(e) => handleInputChange("middleName", e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Last Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={formData.lastName}
+                  onChange={(e) => handleInputChange("lastName", e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Birth Date *</label>
+                <input
+                  type="date"
+                  required
+                  value={formData.birthDate}
+                  onChange={(e) => handleInputChange("birthDate", e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
                 />
               </div>
               <div>
@@ -417,6 +486,17 @@ export function FacultyProfile() {
                 />
               </div>
               <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Contact Number *</label>
+                <input
+                  type="text"
+                  required
+                  value={formData.contactNumber}
+                  onChange={(e) => handleInputChange("contactNumber", e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  placeholder="+63 912 345 6789"
+                />
+              </div>
+              <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Position *</label>
                 <select
                   required
@@ -430,6 +510,16 @@ export function FacultyProfile() {
                   <option value="Professor">Professor</option>
                 </select>
               </div>
+              <div className="col-span-2">
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Address *</label>
+                <textarea
+                  required
+                  value={formData.address}
+                  onChange={(e) => handleInputChange("address", e.target.value)}
+                  rows={2}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Years of Teaching *</label>
                 <input
@@ -441,6 +531,10 @@ export function FacultyProfile() {
                   onChange={(e) => handleInputChange("yearsOfTeaching", parseInt(e.target.value))}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
                 />
+              </div>
+              <div className="col-span-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-800">
+                <p>Auto-generated password: {(formData.lastName?.trim()?.[0] || 'X').toUpperCase()}{formData.birthDate || 'YYYY-MM-DD'}</p>
+                <p className="mt-1 text-xs">Temporary password only. Require account owner to change password after first login.</p>
               </div>
               <div className="col-span-2">
                 <div className="mb-2 flex items-center justify-between">

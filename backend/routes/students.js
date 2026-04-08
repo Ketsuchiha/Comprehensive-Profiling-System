@@ -1,9 +1,24 @@
 const express = require('express');
 const router = express.Router();
+const bcrypt = require('bcryptjs');
 const pool = require('../config/db');
 
 function isMissingTableError(err) {
   return err && err.code === 'ER_NO_SUCH_TABLE';
+}
+
+function normalizeDateInput(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return null;
+  return trimmed;
+}
+
+function generateDefaultPassword(lastName, birthDate) {
+  const initial = (typeof lastName === 'string' && lastName.trim())
+    ? lastName.trim().charAt(0).toUpperCase()
+    : 'X';
+  return `${initial}${birthDate}`;
 }
 
 // ─── STUDENTS CRUD ──────────────────────────────────────────────
@@ -128,16 +143,42 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'student_id, first_name, and last_name are required' });
     }
 
+    const normalizedBirthDate = normalizeDateInput(birth_date);
+    if (!normalizedBirthDate) {
+      return res.status(400).json({ error: 'A valid birth_date is required' });
+    }
+
     await pool.query(
       `INSERT INTO students (student_id, first_name, middle_name, last_name, birth_date, sex,
         civil_status, contact_number, email, address, emergency_contact,
         emergency_contact_num, profile_photo, nationality, religion)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [student_id, first_name, middle_name || null, last_name, birth_date || null, sex || null,
+      [student_id, first_name, middle_name || null, last_name, normalizedBirthDate, sex || null,
        civil_status || null, contact_number || null, email || null, address || null,
        emergency_contact || null, emergency_contact_num || null, profile_photo || null,
        nationality || null, religion || null]
     );
+
+    try {
+      const username = (typeof email === 'string' && email.trim()) ? email.trim().toLowerCase() : student_id;
+      const generatedPassword = generateDefaultPassword(last_name, normalizedBirthDate);
+      const salt = await bcrypt.genSalt(10);
+      const password_hash = await bcrypt.hash(generatedPassword, salt);
+
+      await pool.query(
+        `INSERT INTO users (ref_id, user_type, username, password_hash)
+         VALUES (?, 'Student', ?, ?)
+         ON DUPLICATE KEY UPDATE
+           user_type = VALUES(user_type),
+           username = VALUES(username),
+           password_hash = VALUES(password_hash),
+           is_active = 1`,
+        [student_id, username, password_hash]
+      );
+    } catch (userErr) {
+      await pool.query('DELETE FROM students WHERE student_id = ?', [student_id]);
+      throw new Error(`Student record rollback: failed to create user credentials (${userErr.message})`);
+    }
 
     if (academic) {
       await pool.query(
