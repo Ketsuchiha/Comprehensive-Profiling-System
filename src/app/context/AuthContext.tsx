@@ -1,15 +1,18 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, ReactNode } from 'react';
+import { api } from '../utils/api';
 
 interface User {
   id: string;
   email: string;
   name: string;
+  role?: string;
+  refId?: string;
 }
 
 interface AuthContextType {
   user: User | null;
-  login: (email: string, password: string) => Promise<boolean>;
-  register: (email: string, password: string, name: string) => Promise<boolean>;
+  login: (email: string, password: string) => Promise<{ success: boolean; user?: User; error?: string }>;
+  register: (email: string, password: string, name: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   isAuthenticated: boolean;
 }
@@ -17,69 +20,69 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-
-  useEffect(() => {
-    // Check if user is logged in on mount
+  const [user, setUser] = useState<User | null>(() => {
     const storedUser = localStorage.getItem('ccs_user');
-    if (storedUser) {
-      setUser(JSON.parse(storedUser));
+    if (!storedUser) return null;
+
+    try {
+      return JSON.parse(storedUser) as User;
+    } catch {
+      localStorage.removeItem('ccs_user');
+      return null;
     }
-  }, []);
+  });
 
-  const login = async (email: string, password: string): Promise<boolean> => {
-    // Get stored users
-    const users = JSON.parse(localStorage.getItem('ccs_users') || '[]');
-    
-    // Find user with matching credentials
-    const foundUser = users.find(
-      (u: any) => u.email === email && u.password === password
-    );
+  const login = async (email: string, password: string): Promise<{ success: boolean; user?: User; error?: string }> => {
+    try {
+      const data = await api.post<{ user: { user_id: number; username: string; user_type: string; ref_id: string; display_name?: string } }>('/auth/login', {
+        username: email,
+        password,
+      });
+      const userData: User = {
+        id: String(data.user.user_id),
+        email: data.user.username,
+        name: data.user.display_name || data.user.username,
+        role: data.user.user_type,
+        refId: data.user.ref_id,
+      };
 
-    if (foundUser) {
-      const userData = {
-        id: foundUser.id,
-        email: foundUser.email,
-        name: foundUser.name,
+      if (userData.role === 'Student') {
+        return { success: true, user: userData };
+      }
+
+      setUser(userData);
+      localStorage.setItem('ccs_user', JSON.stringify(userData));
+      return { success: true, user: userData };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Login failed' };
+    }
+  };
+
+  const register = async (email: string, password: string, name: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const data = await api.post<{ user: { user_id: number; username: string; user_type: string; ref_id: string } }>('/auth/register', {
+        username: email,
+        password,
+        user_type: 'Admin',
+      });
+      const userData: User = {
+        id: String(data.user.user_id),
+        email: data.user.username,
+        name: name,
+        role: data.user.user_type,
+        refId: data.user.ref_id,
       };
       setUser(userData);
       localStorage.setItem('ccs_user', JSON.stringify(userData));
-      return true;
+      return { success: true };
+    } catch (error) {
+      const rawMessage = error instanceof Error ? error.message : 'Registration failed';
+      const normalized = rawMessage.toLowerCase();
+      const message = normalized.includes('econnrefused')
+        ? 'Database is currently unavailable. Please try again in a moment.'
+        : rawMessage;
+      return { success: false, error: message };
     }
-    
-    return false;
-  };
-
-  const register = async (email: string, password: string, name: string): Promise<boolean> => {
-    // Get existing users
-    const users = JSON.parse(localStorage.getItem('ccs_users') || '[]');
-    
-    // Check if email already exists
-    if (users.some((u: any) => u.email === email)) {
-      return false;
-    }
-
-    // Create new user
-    const newUser = {
-      id: Date.now().toString(),
-      email,
-      password,
-      name,
-    };
-
-    users.push(newUser);
-    localStorage.setItem('ccs_users', JSON.stringify(users));
-
-    // Auto-login after registration
-    const userData = {
-      id: newUser.id,
-      email: newUser.email,
-      name: newUser.name,
-    };
-    setUser(userData);
-    localStorage.setItem('ccs_user', JSON.stringify(userData));
-    
-    return true;
   };
 
   const logout = () => {

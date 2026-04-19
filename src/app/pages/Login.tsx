@@ -12,18 +12,24 @@ export function Login() {
   const [isLoading, setIsLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
+  const studentPortalUrl = import.meta.env.VITE_STUDENT_PORTAL_URL || 'http://localhost:5174/login';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setIsLoading(true);
 
-    const success = await login(email, password);
-    
-    if (success) {
+    const result = await login(email, password);
+
+    if (result.success) {
+      if (result.user?.role === 'Student') {
+        setIsLoading(false);
+        window.location.assign(studentPortalUrl);
+        return;
+      }
       navigate('/');
     } else {
-      setError('Invalid email or password');
+      setError(result.error || 'Invalid email or password');
     }
     
     setIsLoading(false);
@@ -31,12 +37,11 @@ export function Login() {
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 relative overflow-hidden">
-      {/* Background Image */}
-      <div 
-        className="absolute inset-0 z-0 bg-cover bg-center opacity-10"
-        style={{
-          backgroundImage: `url(${buildingImage})`,
-        }}
+      <img
+        src={buildingImage}
+        alt=""
+        aria-hidden="true"
+        className="absolute inset-0 z-0 h-full w-full object-cover opacity-10"
       />
 
       <div className="w-full max-w-md relative z-10">
@@ -45,7 +50,7 @@ export function Login() {
           <div className="flex justify-center mb-4">
             <img src={logoImage} alt="CCS Logo" className="w-24 h-24" />
           </div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">CCS Admin Dashboard</h1>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">CCS Admin</h1>
           <p className="text-gray-600">Comprehensive Profiling System</p>
         </div>
 
