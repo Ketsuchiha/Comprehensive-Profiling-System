@@ -51,6 +51,13 @@ function normalizeOptionalInteger(value, { min = 0, max = Number.MAX_SAFE_INTEGE
   return normalized;
 }
 
+function normalizeSectionCode(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.toUpperCase();
+}
+
 function calculateAgeFromBirthDate(dateValue) {
   if (!dateValue) return null;
   const birthDate = new Date(`${dateValue}T00:00:00`);
@@ -75,6 +82,44 @@ function calculateYearsSinceDate(dateValue) {
     years -= 1;
   }
   return years >= 0 ? years : 0;
+}
+
+function parsePagination(query) {
+  const hasPagination = query.page !== undefined || query.limit !== undefined;
+  if (!hasPagination) return null;
+
+  const pageValue = Number.parseInt(String(query.page || '1'), 10);
+  const limitValue = Number.parseInt(String(query.limit || '10'), 10);
+
+  const page = Number.isFinite(pageValue) && pageValue > 0 ? pageValue : 1;
+  const limit = Number.isFinite(limitValue) && limitValue > 0
+    ? Math.min(limitValue, 10)
+    : 10;
+
+  return {
+    page,
+    limit,
+    offset: (page - 1) * limit,
+  };
+}
+
+async function generateNextAssignedSection() {
+  try {
+    const [rows] = await pool.query(
+      `SELECT assigned_section
+       FROM faculty_employment
+       WHERE assigned_section REGEXP '^SEC-[0-9]{3}$'
+       ORDER BY CAST(SUBSTRING(assigned_section, 5) AS UNSIGNED) DESC
+       LIMIT 1`
+    );
+
+    const lastValue = rows.length > 0 ? Number(String(rows[0].assigned_section).slice(4)) : 0;
+    const nextValue = Number.isFinite(lastValue) ? lastValue + 1 : 1;
+    return `SEC-${String(nextValue).padStart(3, '0')}`;
+  } catch (err) {
+    if (!isMissingTableError(err)) throw err;
+    return 'SEC-001';
+  }
 }
 
 async function hasFacultyCertificationTable() {
@@ -136,14 +181,79 @@ async function assertFacultyExpertiseMatch(facultyId, subjectCode, specializatio
 // GET / - List all faculty with employment info
 router.get('/', async (req, res) => {
   try {
+    const pagination = parsePagination(req.query || {});
+
+    const conditions = [];
+    const params = [];
+
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    if (search) {
+      const pattern = `%${search}%`;
+      conditions.push("(CONCAT_WS(' ', f.first_name, f.middle_name, f.last_name) LIKE ? OR COALESCE(f.email, '') LIKE ? OR f.faculty_id LIKE ?)");
+      params.push(pattern, pattern, pattern);
+    }
+
+    const expertise = typeof req.query.expertise === 'string' ? req.query.expertise.trim() : '';
+    if (expertise) {
+      conditions.push("COALESCE(f.specialization, '') LIKE ?");
+      params.push(`%${expertise}%`);
+    }
+
+    const minExperienceRaw = typeof req.query.minExperience === 'string' ? req.query.minExperience.trim() : '';
+    if (minExperienceRaw) {
+      const minExperience = Number.parseInt(minExperienceRaw, 10);
+      if (Number.isFinite(minExperience) && minExperience >= 0) {
+        conditions.push('COALESCE(f.work_experience_years, IF(fe.date_hired IS NOT NULL, TIMESTAMPDIFF(YEAR, fe.date_hired, CURDATE()), 0)) >= ?');
+        params.push(minExperience);
+      }
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    if (!pagination) {
+      const [rows] = await pool.query(
+        `SELECT f.*, fe.employment_status, fe.rank, fe.department_id, fe.assigned_section, d.dept_name
+         FROM faculty f
+         LEFT JOIN faculty_employment fe ON f.faculty_id = fe.faculty_id
+         LEFT JOIN departments d ON fe.department_id = d.dept_id
+         ${whereClause}
+         ORDER BY f.last_name, f.first_name`,
+        params
+      );
+      return res.json(rows);
+    }
+
+    const [countRows] = await pool.query(
+      `SELECT COUNT(*) AS total
+       FROM faculty f
+       LEFT JOIN faculty_employment fe ON f.faculty_id = fe.faculty_id
+       ${whereClause}`,
+      params
+    );
+
     const [rows] = await pool.query(
-      `SELECT f.*, fe.employment_status, fe.rank, fe.department_id, d.dept_name
+      `SELECT f.*, fe.employment_status, fe.rank, fe.department_id, fe.assigned_section, d.dept_name
        FROM faculty f
        LEFT JOIN faculty_employment fe ON f.faculty_id = fe.faculty_id
        LEFT JOIN departments d ON fe.department_id = d.dept_id
-       ORDER BY f.last_name, f.first_name`
+       ${whereClause}
+       ORDER BY f.last_name, f.first_name
+       LIMIT ${pagination.limit} OFFSET ${pagination.offset}`,
+      params
     );
-    res.json(rows);
+
+    const total = Number(countRows[0]?.total || 0);
+    const totalPages = total === 0 ? 1 : Math.ceil(total / pagination.limit);
+
+    res.json({
+      data: rows,
+      pagination: {
+        page: pagination.page,
+        limit: pagination.limit,
+        total,
+        totalPages,
+      },
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -169,19 +279,6 @@ router.get('/:id', async (req, res) => {
        WHERE fl.faculty_id = ?`, [id]
     );
     const [research] = await pool.query('SELECT * FROM faculty_research WHERE faculty_id = ?', [id]);
-    let certifications = [];
-    try {
-      const [certRows] = await pool.query(
-        `SELECT cert_id, expertise AS certificate_name, certificate_file, mime_type, uploaded_at
-         FROM faculty_expertise_certifications
-         WHERE faculty_id = ?
-         ORDER BY uploaded_at DESC`,
-        [id]
-      );
-      certifications = certRows;
-    } catch (certErr) {
-      if (!isMissingTableError(certErr)) throw certErr;
-    }
 
     res.json({
       ...faculty[0],
@@ -189,8 +286,7 @@ router.get('/:id', async (req, res) => {
       employment: employment[0] || null,
       evaluations,
       load,
-      research,
-      certifications
+      research
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -283,6 +379,8 @@ router.post('/', async (req, res) => {
       }
     }
     const resolvedRank = rank ?? employment?.rank ?? null;
+    const requestedAssignedSection = normalizeSectionCode(employment?.assigned_section);
+    const resolvedAssignedSection = requestedAssignedSection || await generateNextAssignedSection();
 
     await pool.query(
       `INSERT INTO faculty (faculty_id, first_name, middle_name, last_name, birth_date, gender,
@@ -328,15 +426,16 @@ router.post('/', async (req, res) => {
       throw new Error(`Faculty record rollback: failed to create user credentials (${userErr.message})`);
     }
 
-    if (employment || resolvedRank) {
+    if (employment || resolvedRank || resolvedAssignedSection) {
       await pool.query(
-        `INSERT INTO faculty_employment (faculty_id, employment_status, \`rank\`, department_id, date_hired, tenure_status)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO faculty_employment (faculty_id, employment_status, \`rank\`, department_id, assigned_section, date_hired, tenure_status)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [
           generatedFacultyId,
           employment?.employment_status || null,
           resolvedRank,
           employment?.department_id || null,
+          resolvedAssignedSection,
           employment?.date_hired || null,
           employment?.tenure_status || null
         ]
@@ -386,7 +485,12 @@ router.post('/', async (req, res) => {
       );
     }
 
-    res.status(201).json({ message: 'Faculty created successfully', faculty_id: generatedFacultyId, warning });
+    res.status(201).json({
+      message: 'Faculty created successfully',
+      faculty_id: generatedFacultyId,
+      assigned_section: resolvedAssignedSection,
+      warning
+    });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') {
       return res.status(409).json({ error: 'Faculty ID or email already exists' });
@@ -644,21 +748,31 @@ router.get('/:id/employment', async (req, res) => {
 router.put('/:id/employment', async (req, res) => {
   try {
     const { id } = req.params;
-    const { employment_status, rank, department_id, date_hired, tenure_status } = req.body;
+    const { employment_status, rank, department_id, assigned_section, date_hired, tenure_status } = req.body;
+
+    const normalizedAssignedSection = assigned_section === undefined
+      ? undefined
+      : (assigned_section === null ? null : normalizeSectionCode(assigned_section));
+
+    if (assigned_section !== undefined && assigned_section !== null && !normalizedAssignedSection) {
+      return res.status(400).json({ error: 'assigned_section must be a non-empty string when provided' });
+    }
 
     const [existing] = await pool.query('SELECT faculty_id FROM faculty_employment WHERE faculty_id = ?', [id]);
     if (existing.length === 0) {
+      const resolvedAssignedSection = normalizedAssignedSection || await generateNextAssignedSection();
       await pool.query(
-        'INSERT INTO faculty_employment (faculty_id, employment_status, `rank`, department_id, date_hired, tenure_status) VALUES (?, ?, ?, ?, ?, ?)',
-        [id, employment_status || null, rank || null, department_id || null, date_hired || null, tenure_status || null]
+        'INSERT INTO faculty_employment (faculty_id, employment_status, `rank`, department_id, assigned_section, date_hired, tenure_status) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [id, employment_status || null, rank || null, department_id || null, resolvedAssignedSection, date_hired || null, tenure_status || null]
       );
     } else {
       await pool.query(
         `UPDATE faculty_employment SET employment_status = COALESCE(?, employment_status),
           \`rank\` = COALESCE(?, \`rank\`), department_id = COALESCE(?, department_id),
-          date_hired = COALESCE(?, date_hired), tenure_status = COALESCE(?, tenure_status)
+          assigned_section = COALESCE(?, assigned_section), date_hired = COALESCE(?, date_hired),
+          tenure_status = COALESCE(?, tenure_status)
          WHERE faculty_id = ?`,
-        [employment_status, rank, department_id, date_hired, tenure_status, id]
+        [employment_status, rank, department_id, normalizedAssignedSection, date_hired, tenure_status, id]
       );
     }
 

@@ -29,6 +29,7 @@ app.use('/api/schedules', require('./routes/schedules'));
 app.use('/api/rooms', require('./routes/rooms'));
 app.use('/api/research', require('./routes/research'));
 app.use('/api/instruments', require('./routes/instruments'));
+app.use('/api/violations', require('./routes/violations'));
 
 const PORT = process.env.PORT || 5000;
 
@@ -52,7 +53,61 @@ async function ensureStudentSkillsColumn() {
   }
 }
 
-ensureStudentSkillsColumn().finally(() => {
+async function ensureFacultyAssignedSectionColumn() {
+  try {
+    const [rows] = await pool.query(
+      `SELECT 1
+       FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'faculty_employment'
+         AND COLUMN_NAME = 'assigned_section'
+       LIMIT 1`
+    );
+
+    if (rows.length === 0) {
+      await pool.query('ALTER TABLE faculty_employment ADD COLUMN assigned_section varchar(20) DEFAULT NULL AFTER department_id');
+      console.log('Applied schema update: added faculty_employment.assigned_section column');
+    }
+  } catch (err) {
+    console.warn(`Schema check skipped: ${err.message}`);
+  }
+}
+
+async function ensureStudentViolationsTable() {
+  try {
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS student_violations (
+        violation_id int(11) NOT NULL AUTO_INCREMENT,
+        student_id varchar(20) NOT NULL,
+        violation_type varchar(120) NOT NULL,
+        subject_context varchar(120) DEFAULT NULL,
+        description text DEFAULT NULL,
+        severity enum('Minor','Warning','Serious','Major') DEFAULT 'Warning',
+        status enum('Active','Resolved','Dismissed') DEFAULT 'Active',
+        incident_date date NOT NULL,
+        reported_by varchar(100) DEFAULT NULL,
+        created_at timestamp NOT NULL DEFAULT current_timestamp(),
+        updated_at timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+        PRIMARY KEY (violation_id),
+        KEY student_id (student_id),
+        KEY status (status),
+        KEY incident_date (incident_date),
+        CONSTRAINT student_violations_ibfk_1 FOREIGN KEY (student_id)
+          REFERENCES students (student_id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`
+    );
+  } catch (err) {
+    console.warn(`Schema check skipped: ${err.message}`);
+  }
+}
+
+async function applySchemaUpdates() {
+  await ensureStudentSkillsColumn();
+  await ensureFacultyAssignedSectionColumn();
+  await ensureStudentViolationsTable();
+}
+
+applySchemaUpdates().finally(() => {
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
   });

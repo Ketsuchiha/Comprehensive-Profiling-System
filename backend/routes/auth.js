@@ -58,6 +58,10 @@ function generateStudentTempPasswords(student) {
   ]);
 }
 
+function isStrongEnoughPassword(password) {
+  return typeof password === 'string' && password.length >= 8;
+}
+
 // POST /login
 router.post('/login', async (req, res) => {
   try {
@@ -192,6 +196,72 @@ router.post('/register', async (req, res) => {
     }
     if (err.code === 'ER_BAD_NULL_ERROR' || err.code === 'ER_DATA_TOO_LONG') {
       return res.status(400).json({ error: 'Invalid registration data' });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /change-password
+router.post('/change-password', async (req, res) => {
+  try {
+    const { ref_id, current_password, new_password, user_type } = req.body;
+
+    if (!ref_id || !current_password || !new_password) {
+      return res.status(400).json({ error: 'ref_id, current_password, and new_password are required' });
+    }
+
+    if (!isStrongEnoughPassword(new_password)) {
+      return res.status(400).json({ error: 'New password must be at least 8 characters long' });
+    }
+
+    if (current_password === new_password) {
+      return res.status(400).json({ error: 'New password must be different from current password' });
+    }
+
+    const normalizedRefId = String(ref_id).trim();
+    const expectedUserType = user_type ? normalizeUserType(user_type) : null;
+
+    const [rows] = await pool.query('SELECT * FROM users WHERE ref_id = ? LIMIT 1', [normalizedRefId]);
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'User account not found' });
+    }
+
+    const user = rows[0];
+    if (expectedUserType && user.user_type !== expectedUserType) {
+      return res.status(403).json({ error: 'User account type mismatch' });
+    }
+
+    if (!user.is_active) {
+      return res.status(403).json({ error: 'Account is deactivated' });
+    }
+
+    let currentPasswordMatches = await bcrypt.compare(current_password, user.password_hash);
+
+    // Keep support for first-login student temp passwords, then promote to hashed password.
+    if (!currentPasswordMatches && user.user_type === 'Student') {
+      const [studentRows] = await pool.query(
+        'SELECT birth_date, middle_name, last_name FROM students WHERE student_id = ? LIMIT 1',
+        [user.ref_id]
+      );
+
+      if (studentRows.length > 0) {
+        const validTempPasswords = generateStudentTempPasswords(studentRows[0]);
+        currentPasswordMatches = validTempPasswords.has(current_password);
+      }
+    }
+
+    if (!currentPasswordMatches) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const password_hash = await bcrypt.hash(new_password, salt);
+    await pool.query('UPDATE users SET password_hash = ? WHERE user_id = ?', [password_hash, user.user_id]);
+
+    res.json({ message: 'Password changed successfully' });
+  } catch (err) {
+    if (isDatabaseConnectionError(err)) {
+      return res.status(503).json({ error: 'Database is currently unavailable. Please try again in a moment.' });
     }
     res.status(500).json({ error: err.message });
   }

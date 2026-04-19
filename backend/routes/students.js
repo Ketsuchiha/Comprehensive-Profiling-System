@@ -21,6 +21,23 @@ function generateDefaultPassword(lastName, birthDate) {
   return `${initial}${birthDate}`;
 }
 
+function generateStudentTempPasswords(student) {
+  const birthDate = normalizeDateInput(student && student.birth_date);
+  if (!birthDate) return new Set();
+
+  const middleInitial = (student && typeof student.middle_name === 'string' && student.middle_name.trim())
+    ? student.middle_name.trim().charAt(0).toUpperCase()
+    : 'X';
+  const lastInitial = (student && typeof student.last_name === 'string' && student.last_name.trim())
+    ? student.last_name.trim().charAt(0).toUpperCase()
+    : 'X';
+
+  return new Set([
+    `${lastInitial}${birthDate}`,
+    `${middleInitial}${birthDate}`,
+  ]);
+}
+
 function isBlank(value) {
   return value == null || (typeof value === 'string' && value.trim() === '');
 }
@@ -32,8 +49,184 @@ function normalizeOptionalString(value, { toLower = false } = {}) {
   return toLower ? trimmed.toLowerCase() : trimmed;
 }
 
+function normalizeCourseCode(value) {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toUpperCase();
+  return normalized || null;
+}
+
+function normalizeCourseCodes(courseCodes) {
+  if (!Array.isArray(courseCodes)) return [];
+  const unique = new Set();
+  for (const rawCode of courseCodes) {
+    const normalized = normalizeCourseCode(rawCode);
+    if (normalized) unique.add(normalized);
+  }
+  return Array.from(unique);
+}
+
+function parsePrerequisiteCodes(prerequisiteValue) {
+  if (typeof prerequisiteValue !== 'string' || !prerequisiteValue.trim()) return [];
+
+  const normalized = prerequisiteValue
+    .toUpperCase()
+    .replace(/\bAND\b/g, ',')
+    .replace(/\bOR\b/g, ',')
+    .replace(/[;/|]/g, ',');
+
+  const matches = normalized.match(/[A-Z]{2,}\d{2,}/g);
+  if (!matches) return [];
+  return Array.from(new Set(matches));
+}
+
+async function validateStudentCourseAssignments({
+  studentId,
+  courseCodes,
+  requestedProgram,
+  requestedYearLevel,
+  includeCurrentAssignments = true,
+}) {
+  const normalizedCourseCodes = normalizeCourseCodes(courseCodes);
+  if (normalizedCourseCodes.length === 0) {
+    return { normalizedCourseCodes, errors: [] };
+  }
+
+  const coursePlaceholders = normalizedCourseCodes.map(() => '?').join(', ');
+
+  const [subjectRows] = await pool.query(
+    `SELECT subject_code FROM subjects WHERE subject_code IN (${coursePlaceholders})`,
+    normalizedCourseCodes
+  );
+  const validSubjectCodes = new Set(subjectRows.map((row) => row.subject_code));
+  const missingSubjectCodes = normalizedCourseCodes.filter((code) => !validSubjectCodes.has(code));
+
+  if (missingSubjectCodes.length > 0) {
+    return {
+      normalizedCourseCodes,
+      errors: [`Unknown subject code(s): ${missingSubjectCodes.join(', ')}`],
+    };
+  }
+
+  let program = normalizeOptionalString(requestedProgram);
+  let yearLevel = Number.isFinite(Number(requestedYearLevel)) ? Number(requestedYearLevel) : null;
+
+  if (studentId && (!program || !yearLevel)) {
+    const [academicRows] = await pool.query(
+      'SELECT program, year_level FROM student_academic WHERE student_id = ? LIMIT 1',
+      [studentId]
+    );
+    if (academicRows.length > 0) {
+      if (!program) {
+        program = normalizeOptionalString(academicRows[0].program);
+      }
+      if (!yearLevel && Number.isFinite(Number(academicRows[0].year_level))) {
+        yearLevel = Number(academicRows[0].year_level);
+      }
+    }
+  }
+
+  let curriculumRows = [];
+  if (program) {
+    const [programRows] = await pool.query(
+      `SELECT cs.subject_code, cs.year_level, cs.prerequisite
+       FROM curriculum_subjects cs
+       INNER JOIN curriculum c ON c.curriculum_id = cs.curriculum_id
+       WHERE c.is_active = 1
+         AND c.program = ?
+         AND cs.subject_code IN (${coursePlaceholders})`,
+      [program, ...normalizedCourseCodes]
+    );
+    curriculumRows = programRows;
+  }
+
+  if (curriculumRows.length === 0) {
+    const [fallbackRows] = await pool.query(
+      `SELECT cs.subject_code, cs.year_level, cs.prerequisite
+       FROM curriculum_subjects cs
+       INNER JOIN curriculum c ON c.curriculum_id = cs.curriculum_id
+       WHERE c.is_active = 1
+         AND cs.subject_code IN (${coursePlaceholders})`,
+      normalizedCourseCodes
+    );
+    curriculumRows = fallbackRows;
+  }
+
+  const curriculumBySubject = new Map();
+  for (const row of curriculumRows) {
+    if (!curriculumBySubject.has(row.subject_code)) {
+      curriculumBySubject.set(row.subject_code, row);
+    }
+  }
+
+  const errors = [];
+
+  if (yearLevel) {
+    const yearRestrictedSubjects = normalizedCourseCodes.filter((code) => {
+      const curriculumEntry = curriculumBySubject.get(code);
+      return curriculumEntry && curriculumEntry.year_level && Number(curriculumEntry.year_level) > yearLevel;
+    });
+
+    if (yearRestrictedSubjects.length > 0) {
+      errors.push(`Student year level ${yearLevel} cannot take yet: ${yearRestrictedSubjects.join(', ')}`);
+    }
+  }
+
+  const prerequisiteChecks = normalizedCourseCodes
+    .map((code) => ({ code, prerequisites: parsePrerequisiteCodes(curriculumBySubject.get(code)?.prerequisite) }))
+    .filter((entry) => entry.prerequisites.length > 0);
+
+  if (prerequisiteChecks.length > 0) {
+    const satisfiedSubjects = new Set(normalizedCourseCodes);
+
+    if (studentId) {
+      const [gradeRows] = await pool.query(
+        `SELECT DISTINCT subject_code
+         FROM student_grades
+         WHERE student_id = ?
+           AND (
+             remarks = 'Passed'
+             OR (remarks IS NULL AND final_grade IS NOT NULL)
+           )`,
+        [studentId]
+      );
+      for (const row of gradeRows) {
+        satisfiedSubjects.add(row.subject_code);
+      }
+
+      if (includeCurrentAssignments) {
+        try {
+          const [assignmentRows] = await pool.query(
+            'SELECT subject_code FROM student_course_assignments WHERE student_id = ?',
+            [studentId]
+          );
+          for (const row of assignmentRows) {
+            satisfiedSubjects.add(row.subject_code);
+          }
+        } catch (err) {
+          if (!isMissingTableError(err)) throw err;
+        }
+      }
+    }
+
+    const prerequisiteFailures = [];
+    for (const check of prerequisiteChecks) {
+      const missing = check.prerequisites.filter((code) => !satisfiedSubjects.has(code));
+      if (missing.length > 0) {
+        prerequisiteFailures.push(`${check.code} (missing: ${missing.join(', ')})`);
+      }
+    }
+
+    if (prerequisiteFailures.length > 0) {
+      errors.push(`Prerequisite not satisfied: ${prerequisiteFailures.join('; ')}`);
+    }
+  }
+
+  return { normalizedCourseCodes, errors };
+}
+
 let hasSkillsColumnCache = null;
 let hasPasswordColumnCache = null;
+let hasViolationsTableCache = null;
 
 async function hasStudentSkillsColumn() {
   if (typeof hasSkillsColumnCache === 'boolean') {
@@ -79,18 +272,107 @@ async function hasStudentPasswordColumn() {
   return hasPasswordColumnCache;
 }
 
+async function hasStudentViolationsTable() {
+  if (typeof hasViolationsTableCache === 'boolean') {
+    return hasViolationsTableCache;
+  }
+
+  try {
+    const [rows] = await pool.query("SHOW TABLES LIKE 'student_violations'");
+    hasViolationsTableCache = rows.length > 0;
+  } catch {
+    hasViolationsTableCache = false;
+  }
+
+  return hasViolationsTableCache;
+}
+
+function parsePagination(query) {
+  const hasPagination = query.page !== undefined || query.limit !== undefined;
+  if (!hasPagination) return null;
+
+  const pageValue = Number.parseInt(String(query.page || '1'), 10);
+  const limitValue = Number.parseInt(String(query.limit || '10'), 10);
+
+  const page = Number.isFinite(pageValue) && pageValue > 0 ? pageValue : 1;
+  const limit = Number.isFinite(limitValue) && limitValue > 0
+    ? Math.min(limitValue, 10)
+    : 10;
+
+  return {
+    page,
+    limit,
+    offset: (page - 1) * limit,
+  };
+}
+
 // ─── STUDENTS CRUD ──────────────────────────────────────────────
 
 // GET / - List all students with academic info
 router.get('/', async (req, res) => {
   try {
+    const pagination = parsePagination(req.query || {});
+
+    const conditions = [];
+    const params = [];
+
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    if (search) {
+      const pattern = `%${search}%`;
+      conditions.push("(CONCAT_WS(' ', s.first_name, s.middle_name, s.last_name) LIKE ? OR s.student_id LIKE ? OR COALESCE(s.email, '') LIKE ?)");
+      params.push(pattern, pattern, pattern);
+    }
+
+    const skill = typeof req.query.skill === 'string' ? req.query.skill.trim().toLowerCase() : '';
+    if (skill) {
+      conditions.push("LOWER(COALESCE(s.skills, '')) LIKE ?");
+      params.push(`%${skill}%`);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    if (!pagination) {
+      const [rows] = await pool.query(
+        `SELECT s.*, sa.program, sa.year_level, sa.section, sa.enrollment_status
+         FROM students s
+         LEFT JOIN student_academic sa ON s.student_id = sa.student_id
+         ${whereClause}
+         ORDER BY s.last_name, s.first_name`,
+        params
+      );
+      return res.json(rows);
+    }
+
+    const [countRows] = await pool.query(
+      `SELECT COUNT(*) AS total
+       FROM students s
+       LEFT JOIN student_academic sa ON s.student_id = sa.student_id
+       ${whereClause}`,
+      params
+    );
+
     const [rows] = await pool.query(
       `SELECT s.*, sa.program, sa.year_level, sa.section, sa.enrollment_status
        FROM students s
        LEFT JOIN student_academic sa ON s.student_id = sa.student_id
-       ORDER BY s.last_name, s.first_name`
+       ${whereClause}
+       ORDER BY s.last_name, s.first_name
+       LIMIT ${pagination.limit} OFFSET ${pagination.offset}`,
+      params
     );
-    res.json(rows);
+
+    const total = Number(countRows[0]?.total || 0);
+    const totalPages = total === 0 ? 1 : Math.ceil(total / pagination.limit);
+
+    res.json({
+      data: rows,
+      pagination: {
+        page: pagination.page,
+        limit: pagination.limit,
+        total,
+        totalPages,
+      },
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -173,15 +455,87 @@ router.get('/:id/dashboard', async (req, res) => {
       [id]
     );
 
+    let activeViolationCount = 0;
+    if (await hasStudentViolationsTable()) {
+      const [violationSummary] = await pool.query(
+        `SELECT COUNT(*) AS active_violations
+         FROM student_violations
+         WHERE student_id = ? AND status = 'Active'`,
+        [id]
+      );
+      activeViolationCount = Number(violationSummary[0]?.active_violations || 0);
+    }
+
     res.json({
       student: student[0],
       summary: {
         total_subjects: gradeSummary[0].total_subjects,
         average_final_grade: gradeSummary[0].average_final_grade,
         total_schedules: scheduleSummary[0].total_schedules,
-        registered_events: eventSummary[0].registered_events
+        registered_events: eventSummary[0].registered_events,
+        active_violations: activeViolationCount
       }
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /:id/change-password - Student self-service password change
+router.post('/:id/change-password', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { current_password, new_password } = req.body;
+
+    if (isBlank(current_password) || isBlank(new_password)) {
+      return res.status(400).json({ error: 'current_password and new_password are required' });
+    }
+
+    if (typeof new_password !== 'string' || new_password.length < 8) {
+      return res.status(400).json({ error: 'New password must be at least 8 characters long' });
+    }
+
+    if (String(current_password) === String(new_password)) {
+      return res.status(400).json({ error: 'New password must be different from current password' });
+    }
+
+    const [userRows] = await pool.query(
+      `SELECT user_id, password_hash
+       FROM users
+       WHERE ref_id = ? AND user_type = 'Student' AND is_active = 1
+       LIMIT 1`,
+      [id]
+    );
+
+    if (userRows.length === 0) {
+      return res.status(404).json({ error: 'Student user account not found' });
+    }
+
+    const user = userRows[0];
+    let isMatch = await bcrypt.compare(String(current_password), user.password_hash);
+
+    // Support existing temporary password combinations for first-time change.
+    if (!isMatch) {
+      const [studentRows] = await pool.query(
+        'SELECT birth_date, middle_name, last_name FROM students WHERE student_id = ? LIMIT 1',
+        [id]
+      );
+
+      if (studentRows.length > 0) {
+        const validTempPasswords = generateStudentTempPasswords(studentRows[0]);
+        isMatch = validTempPasswords.has(String(current_password));
+      }
+    }
+
+    if (!isMatch) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const password_hash = await bcrypt.hash(String(new_password), salt);
+    await pool.query('UPDATE users SET password_hash = ? WHERE user_id = ?', [password_hash, user.user_id]);
+
+    res.json({ message: 'Password changed successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -196,6 +550,25 @@ router.post('/', async (req, res) => {
       emergency_contact_num, profile_photo, nationality, religion, skills,
       academic, course_codes
     } = req.body;
+
+    if (course_codes !== undefined && !Array.isArray(course_codes)) {
+      return res.status(400).json({ error: 'course_codes must be an array when provided' });
+    }
+
+    const {
+      normalizedCourseCodes,
+      errors: courseValidationErrors,
+    } = await validateStudentCourseAssignments({
+      studentId: null,
+      courseCodes: Array.isArray(course_codes) ? course_codes : [],
+      requestedProgram: academic?.program,
+      requestedYearLevel: academic?.year_level,
+      includeCurrentAssignments: false,
+    });
+
+    if (courseValidationErrors.length > 0) {
+      return res.status(400).json({ error: courseValidationErrors.join(' | ') });
+    }
 
     const missingRequired = [];
     if (isBlank(student_id)) missingRequired.push('student_id');
@@ -304,9 +677,9 @@ router.post('/', async (req, res) => {
       );
     }
 
-    if (Array.isArray(course_codes) && course_codes.length > 0) {
+    if (normalizedCourseCodes.length > 0) {
       try {
-        const values = course_codes.map((subjectCode) => [student_id, subjectCode]);
+        const values = normalizedCourseCodes.map((subjectCode) => [student_id, subjectCode]);
         await pool.query(
           'INSERT INTO student_course_assignments (student_id, subject_code) VALUES ? ON DUPLICATE KEY UPDATE subject_code = VALUES(subject_code)',
           [values]
@@ -355,9 +728,22 @@ router.put('/:id/courses', async (req, res) => {
       return res.status(400).json({ error: 'course_codes must be an array' });
     }
 
+    const {
+      normalizedCourseCodes,
+      errors: courseValidationErrors,
+    } = await validateStudentCourseAssignments({
+      studentId: id,
+      courseCodes: course_codes,
+      includeCurrentAssignments: true,
+    });
+
+    if (courseValidationErrors.length > 0) {
+      return res.status(400).json({ error: courseValidationErrors.join(' | ') });
+    }
+
     await pool.query('DELETE FROM student_course_assignments WHERE student_id = ?', [id]);
-    if (course_codes.length > 0) {
-      const values = course_codes.map((subjectCode) => [id, subjectCode]);
+    if (normalizedCourseCodes.length > 0) {
+      const values = normalizedCourseCodes.map((subjectCode) => [id, subjectCode]);
       await pool.query('INSERT INTO student_course_assignments (student_id, subject_code) VALUES ?', [values]);
     }
 
@@ -484,6 +870,9 @@ router.delete('/:id', async (req, res) => {
     await pool.query('DELETE FROM student_documents WHERE student_id = ?', [id]);
     await pool.query('DELETE FROM student_internship WHERE student_id = ?', [id]);
     await pool.query('DELETE FROM student_orgs WHERE student_id = ?', [id]);
+    if (await hasStudentViolationsTable()) {
+      await pool.query('DELETE FROM student_violations WHERE student_id = ?', [id]);
+    }
     await pool.query('DELETE FROM student_academic WHERE student_id = ?', [id]);
     const [result] = await pool.query('DELETE FROM students WHERE student_id = ?', [id]);
 
@@ -640,6 +1029,26 @@ router.get('/:id/events', async (req, res) => {
        INNER JOIN events e ON ep.event_id = e.event_id
        WHERE ep.participant_id = ? AND ep.participant_type = 'Student'
        ORDER BY e.start_date DESC`,
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /:id/violations - Student violation records
+router.get('/:id/violations', async (req, res) => {
+  try {
+    if (!(await hasStudentViolationsTable())) {
+      return res.json([]);
+    }
+
+    const [rows] = await pool.query(
+      `SELECT violation_id, student_id, violation_type, subject_context, description, severity, status, incident_date, reported_by, created_at
+       FROM student_violations
+       WHERE student_id = ?
+       ORDER BY incident_date DESC, violation_id DESC`,
       [req.params.id]
     );
     res.json(rows);

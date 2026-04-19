@@ -2,19 +2,114 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
 
+function parsePagination(query) {
+  const hasPagination = query.page !== undefined || query.limit !== undefined;
+  if (!hasPagination) return null;
+
+  const pageValue = Number.parseInt(String(query.page || '1'), 10);
+  const limitValue = Number.parseInt(String(query.limit || '10'), 10);
+
+  const page = Number.isFinite(pageValue) && pageValue > 0 ? pageValue : 1;
+  const limit = Number.isFinite(limitValue) && limitValue > 0
+    ? Math.min(limitValue, 10)
+    : 10;
+
+  return {
+    page,
+    limit,
+    offset: (page - 1) * limit,
+  };
+}
+
+function buildEventFilterClause(query) {
+  const conditions = [];
+  const params = [];
+
+  const search = typeof query.search === 'string' ? query.search.trim() : '';
+  if (search) {
+    const pattern = `%${search}%`;
+    conditions.push("(e.title LIKE ? OR COALESCE(e.description, '') LIKE ? OR COALESCE(e.venue, '') LIKE ?)");
+    params.push(pattern, pattern, pattern);
+  }
+
+  const status = typeof query.status === 'string' ? query.status.trim() : '';
+  if (status) {
+    conditions.push('e.status = ?');
+    params.push(status);
+  }
+
+  const type = typeof query.type === 'string' ? query.type.trim().toLowerCase() : '';
+  if (type && type !== 'all') {
+    if (type === 'seminar') {
+      conditions.push('e.event_type = ?');
+      params.push('Seminar');
+    } else if (type === 'conference') {
+      conditions.push('e.event_type = ?');
+      params.push('Academic');
+    } else if (type === 'workshop') {
+      conditions.push('e.event_type IN (?, ?, ?)');
+      params.push('Sports', 'Cultural', 'Organizational');
+    } else if (type === 'meeting') {
+      conditions.push('e.event_type = ?');
+      params.push('Other');
+    }
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  return { whereClause, params };
+}
+
 // ─── EVENTS CRUD ────────────────────────────────────────────────
 
 // GET / - List all events with participant count
 router.get('/', async (req, res) => {
   try {
+    const pagination = parsePagination(req.query || {});
+    const { whereClause, params } = buildEventFilterClause(req.query || {});
+
+    if (!pagination) {
+      const [rows] = await pool.query(
+        `SELECT e.*, COUNT(ep.participation_id) AS participant_count
+         FROM events e
+         LEFT JOIN event_participants ep ON e.event_id = ep.event_id
+         ${whereClause}
+         GROUP BY e.event_id
+         ORDER BY e.start_date DESC`,
+        params
+      );
+      return res.json(rows);
+    }
+
+    const [countRows] = await pool.query(
+      `SELECT COUNT(*) AS total
+       FROM events e
+       ${whereClause}`,
+      params
+    );
+
     const [rows] = await pool.query(
       `SELECT e.*, COUNT(ep.participation_id) AS participant_count
        FROM events e
        LEFT JOIN event_participants ep ON e.event_id = ep.event_id
+       ${whereClause}
        GROUP BY e.event_id
-       ORDER BY e.start_date DESC`
+       ORDER BY e.start_date DESC
+       LIMIT ${pagination.limit} OFFSET ${pagination.offset}`,
+      params
     );
-    res.json(rows);
+
+    const total = Number(countRows[0]?.total || 0);
+    const totalPages = total === 0 ? 1 : Math.ceil(total / pagination.limit);
+
+    res.json({
+      data: rows,
+      pagination: {
+        page: pagination.page,
+        limit: pagination.limit,
+        total,
+        totalPages,
+      },
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -37,6 +37,123 @@ function saveInstrumentFile(fileDataBase64, fileName, mimeType) {
   return `/uploads/instruments/${storedFileName}`;
 }
 
+function parsePagination(query) {
+  const hasPagination = query.page !== undefined || query.limit !== undefined;
+  if (!hasPagination) return null;
+
+  const pageValue = Number.parseInt(String(query.page || '1'), 10);
+  const limitValue = Number.parseInt(String(query.limit || '10'), 10);
+
+  const page = Number.isFinite(pageValue) && pageValue > 0 ? pageValue : 1;
+  const limit = Number.isFinite(limitValue) && limitValue > 0
+    ? Math.min(limitValue, 10)
+    : 10;
+
+  return {
+    page,
+    limit,
+    offset: (page - 1) * limit,
+  };
+}
+
+const INSTRUMENTS_UNION_QUERY = `
+  SELECT
+    sy.syllabus_id AS item_id,
+    'syllabus' AS item_type,
+    CONCAT(COALESCE(s.subject_name, sy.subject_code, 'Untitled'), ' Syllabus') AS title,
+    sy.subject_code,
+    f.first_name AS faculty_first_name,
+    f.last_name AS faculty_last_name,
+    sy.created_at,
+    sy.references_biblio AS file_url
+  FROM syllabus sy
+  LEFT JOIN subjects s ON sy.subject_code = s.subject_code
+  LEFT JOIN faculty f ON sy.faculty_id = f.faculty_id
+
+  UNION ALL
+
+  SELECT
+    l.lesson_id AS item_id,
+    'lesson' AS item_type,
+    COALESCE(l.title, CONCAT('Lesson ', l.lesson_id)) AS title,
+    sy.subject_code,
+    f.first_name AS faculty_first_name,
+    f.last_name AS faculty_last_name,
+    l.created_at,
+    COALESCE(l.file_path, l.external_url) AS file_url
+  FROM lessons l
+  LEFT JOIN syllabus_topics st ON l.topic_id = st.topic_id
+  LEFT JOIN syllabus sy ON st.syllabus_id = sy.syllabus_id
+  LEFT JOIN faculty f ON sy.faculty_id = f.faculty_id
+`;
+
+// GET / - List combined instruments (syllabus + lesson), supports pagination
+router.get('/', async (req, res) => {
+  try {
+    const pagination = parsePagination(req.query || {});
+
+    const conditions = [];
+    const params = [];
+
+    const type = typeof req.query.type === 'string' ? req.query.type.trim().toLowerCase() : '';
+    if (type && type !== 'all') {
+      conditions.push('q.item_type = ?');
+      params.push(type);
+    }
+
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    if (search) {
+      const pattern = `%${search}%`;
+      conditions.push("(q.title LIKE ? OR COALESCE(q.subject_code, '') LIKE ? OR CONCAT(COALESCE(q.faculty_first_name, ''), ' ', COALESCE(q.faculty_last_name, '')) LIKE ?)");
+      params.push(pattern, pattern, pattern);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    if (!pagination) {
+      const [rows] = await pool.query(
+        `SELECT *
+         FROM (${INSTRUMENTS_UNION_QUERY}) AS q
+         ${whereClause}
+         ORDER BY q.created_at DESC`,
+        params
+      );
+      return res.json(rows);
+    }
+
+    const [countRows] = await pool.query(
+      `SELECT COUNT(*) AS total
+       FROM (${INSTRUMENTS_UNION_QUERY}) AS q
+       ${whereClause}`,
+      params
+    );
+
+    const [rows] = await pool.query(
+      `SELECT *
+       FROM (${INSTRUMENTS_UNION_QUERY}) AS q
+       ${whereClause}
+       ORDER BY q.created_at DESC
+       LIMIT ${pagination.limit} OFFSET ${pagination.offset}`,
+      params
+    );
+
+    const total = Number(countRows[0]?.total || 0);
+    const totalPages = total === 0 ? 1 : Math.ceil(total / pagination.limit);
+
+    res.json({
+      data: rows,
+      pagination: {
+        page: pagination.page,
+        limit: pagination.limit,
+        total,
+        totalPages,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── SYLLABUS CRUD ──────────────────────────────────────────────
 
 // GET /syllabus - List all syllabi

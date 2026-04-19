@@ -11,6 +11,25 @@ function isMissingTableError(err) {
   return err && err.code === 'ER_NO_SUCH_TABLE';
 }
 
+function parsePagination(query) {
+  const hasPagination = query.page !== undefined || query.limit !== undefined;
+  if (!hasPagination) return null;
+
+  const pageValue = Number.parseInt(String(query.page || '1'), 10);
+  const limitValue = Number.parseInt(String(query.limit || '10'), 10);
+
+  const page = Number.isFinite(pageValue) && pageValue > 0 ? pageValue : 1;
+  const limit = Number.isFinite(limitValue) && limitValue > 0
+    ? Math.min(limitValue, 10)
+    : 10;
+
+  return {
+    page,
+    limit,
+    offset: (page - 1) * limit,
+  };
+}
+
 async function getFacultyExpertiseValues(facultyId, specialization) {
   const expertiseValues = [];
   if (typeof specialization === 'string' && specialization.trim()) {
@@ -52,6 +71,49 @@ async function assertFacultyExpertiseMatch(facultyId, subjectCode, subjectName, 
 // GET / - List all schedules with joined info
 router.get('/', async (req, res) => {
   try {
+    const pagination = parsePagination(req.query || {});
+
+    const conditions = [];
+    const params = [];
+
+    const day = typeof req.query.day === 'string' ? req.query.day.trim() : '';
+    if (day && day.toLowerCase() !== 'all') {
+      conditions.push('sc.day_of_week LIKE ?');
+      params.push(`%${day}%`);
+    }
+
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    if (search) {
+      const pattern = `%${search}%`;
+      conditions.push("(sc.subject_code LIKE ? OR COALESCE(s.subject_name, '') LIKE ? OR COALESCE(sc.section, '') LIKE ?)");
+      params.push(pattern, pattern, pattern);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    if (!pagination) {
+      const [rows] = await pool.query(
+        `SELECT sc.*, s.subject_name, f.first_name AS faculty_first_name, f.last_name AS faculty_last_name,
+          r.room_name, r.building
+         FROM schedules sc
+         LEFT JOIN subjects s ON sc.subject_code = s.subject_code
+         LEFT JOIN faculty f ON sc.faculty_id = f.faculty_id
+         LEFT JOIN rooms r ON sc.room_id = r.room_id
+         ${whereClause}
+         ORDER BY sc.day_of_week, sc.start_time`,
+        params
+      );
+      return res.json(rows);
+    }
+
+    const [countRows] = await pool.query(
+      `SELECT COUNT(*) AS total
+       FROM schedules sc
+       LEFT JOIN subjects s ON sc.subject_code = s.subject_code
+       ${whereClause}`,
+      params
+    );
+
     const [rows] = await pool.query(
       `SELECT sc.*, s.subject_name, f.first_name AS faculty_first_name, f.last_name AS faculty_last_name,
         r.room_name, r.building
@@ -59,7 +121,42 @@ router.get('/', async (req, res) => {
        LEFT JOIN subjects s ON sc.subject_code = s.subject_code
        LEFT JOIN faculty f ON sc.faculty_id = f.faculty_id
        LEFT JOIN rooms r ON sc.room_id = r.room_id
-       ORDER BY sc.day_of_week, sc.start_time`
+       ${whereClause}
+       ORDER BY sc.day_of_week, sc.start_time
+       LIMIT ${pagination.limit} OFFSET ${pagination.offset}`,
+      params
+    );
+
+    const total = Number(countRows[0]?.total || 0);
+    const totalPages = total === 0 ? 1 : Math.ceil(total / pagination.limit);
+
+    res.json({
+      data: rows,
+      pagination: {
+        page: pagination.page,
+        limit: pagination.limit,
+        total,
+        totalPages,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /calendar - Lightweight schedule rows for calendar rendering
+router.get('/calendar', async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT sc.schedule_id, sc.subject_code, s.subject_name, sc.section,
+              sc.day_of_week, sc.start_time, sc.end_time,
+              f.first_name AS faculty_first_name, f.last_name AS faculty_last_name,
+              r.room_name
+       FROM schedules sc
+       LEFT JOIN subjects s ON sc.subject_code = s.subject_code
+       LEFT JOIN faculty f ON sc.faculty_id = f.faculty_id
+       LEFT JOIN rooms r ON sc.room_id = r.room_id
+       ORDER BY day_of_week, start_time`
     );
     res.json(rows);
   } catch (err) {
@@ -102,14 +199,24 @@ router.post('/', async (req, res) => {
     }
 
     const normalizedFacultyId = typeof faculty_id === 'string' && faculty_id.trim() ? faculty_id.trim() : null;
+    let resolvedSection = typeof section === 'string' && section.trim() ? section.trim() : null;
     if (faculty_id) {
       const [facultyRows] = await pool.query(
-        'SELECT faculty_id, specialization FROM faculty WHERE faculty_id = ? LIMIT 1',
+        `SELECT f.faculty_id, f.specialization, fe.assigned_section
+         FROM faculty f
+         LEFT JOIN faculty_employment fe ON fe.faculty_id = f.faculty_id
+         WHERE f.faculty_id = ?
+         LIMIT 1`,
         [normalizedFacultyId]
       );
       if (facultyRows.length === 0) {
         return res.status(400).json({ error: 'Faculty ID does not exist.' });
       }
+
+      if (!resolvedSection && facultyRows[0].assigned_section) {
+        resolvedSection = facultyRows[0].assigned_section;
+      }
+
       await assertFacultyExpertiseMatch(
         normalizedFacultyId,
         subjectRows[0].subject_code,
@@ -128,7 +235,7 @@ router.post('/', async (req, res) => {
     const [result] = await pool.query(
       `INSERT INTO schedules (subject_code, section, faculty_id, room_id, semester, academic_year, day_of_week, start_time, end_time, schedule_type)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [subject_code, section || null, normalizedFacultyId, room_id || null, semester || null,
+      [subject_code, resolvedSection, normalizedFacultyId, room_id || null, semester || null,
        academic_year || null, day_of_week || null, start_time || null, end_time || null, schedule_type || null]
     );
 
@@ -154,7 +261,7 @@ router.put('/:id', async (req, res) => {
     const { subject_code, section, faculty_id, room_id, semester, academic_year, day_of_week, start_time, end_time, schedule_type } = req.body;
 
     const [existingRows] = await pool.query(
-      'SELECT subject_code, faculty_id FROM schedules WHERE schedule_id = ? LIMIT 1',
+      'SELECT subject_code, faculty_id, section FROM schedules WHERE schedule_id = ? LIMIT 1',
       [id]
     );
     if (existingRows.length === 0) {
@@ -172,14 +279,24 @@ router.put('/:id', async (req, res) => {
       return res.status(400).json({ error: 'Subject code does not exist. Create/select a valid subject first.' });
     }
 
+    let resolvedSection = section;
     if (!isBlank(normalizedFacultyId)) {
       const [facultyRows] = await pool.query(
-        'SELECT faculty_id, specialization FROM faculty WHERE faculty_id = ? LIMIT 1',
+        `SELECT f.faculty_id, f.specialization, fe.assigned_section
+         FROM faculty f
+         LEFT JOIN faculty_employment fe ON fe.faculty_id = f.faculty_id
+         WHERE f.faculty_id = ?
+         LIMIT 1`,
         [normalizedFacultyId]
       );
       if (facultyRows.length === 0) {
         return res.status(400).json({ error: 'Faculty ID does not exist.' });
       }
+
+      if (isBlank(section) && isBlank(existingRows[0].section) && facultyRows[0].assigned_section) {
+        resolvedSection = facultyRows[0].assigned_section;
+      }
+
       await assertFacultyExpertiseMatch(
         normalizedFacultyId,
         subjectRows[0].subject_code,
@@ -197,7 +314,7 @@ router.put('/:id', async (req, res) => {
        WHERE schedule_id = ?`,
       [
         subject_code,
-        section,
+        isBlank(resolvedSection) ? null : resolvedSection,
         isBlank(faculty_id) ? null : faculty_id,
         room_id,
         semester,
