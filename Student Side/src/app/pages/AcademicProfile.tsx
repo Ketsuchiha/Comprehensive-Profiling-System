@@ -1,18 +1,78 @@
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { GraduationCap, BookOpen, Award, Calendar, TrendingUp, Users } from "lucide-react";
 import { Badge } from "../components/ui/badge";
+import { useEffect, useMemo, useState } from "react";
+import { api } from "../utils/api";
+import { useAuth } from "../context/AuthContext";
 
-const mockAcademicProfile = {
-  program: "Bachelor of Science in Computer Science",
-  major: "Software Engineering",
-  yearLevel: "3rd Year",
-  section: "CS-3A",
-  scholarshipType: "Academic Excellence Scholarship",
-  enrollmentStatus: "Regular",
-  dateAdmitted: "August 15, 2023",
+type AcademicRecord = {
+  program: string | null;
+  major: string | null;
+  track: string | null;
+  year_level: number | null;
+  section: string | null;
+  scholarship_type: string | null;
+  enrollment_status: string | null;
+  admission_date: string | null;
+};
+
+type CourseRecord = {
+  subject_code: string;
+};
+
+type GradeRecord = {
+  final_grade: number | null;
 };
 
 export default function AcademicProfile() {
+  const { user } = useAuth();
+  const [academic, setAcademic] = useState<AcademicRecord | null>(null);
+  const [courses, setCourses] = useState<CourseRecord[]>([]);
+  const [grades, setGrades] = useState<GradeRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!user?.refId) {
+      setLoading(false);
+      return;
+    }
+
+    let isMounted = true;
+    setLoading(true);
+
+    Promise.all([
+      api.get<AcademicRecord>(`/students/${encodeURIComponent(user.refId)}/academic`).catch(() => null),
+      api.get<CourseRecord[]>(`/students/${encodeURIComponent(user.refId)}/courses`).catch(() => []),
+      api.get<GradeRecord[]>(`/students/${encodeURIComponent(user.refId)}/grades`).catch(() => []),
+    ])
+      .then(([academicData, courseData, gradeData]) => {
+        if (!isMounted) return;
+        setAcademic(academicData);
+        setCourses(courseData);
+        setGrades(gradeData);
+      })
+      .finally(() => {
+        if (!isMounted) return;
+        setLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user?.refId]);
+
+  const cumulativeGpa = useMemo(() => {
+    const validGrades = grades.filter((g) => typeof g.final_grade === "number") as Array<{ final_grade: number }>;
+    if (validGrades.length === 0) return "-";
+    const avg = validGrades.reduce((sum, g) => sum + g.final_grade, 0) / validGrades.length;
+    return avg.toFixed(2);
+  }, [grades]);
+
+  const yearLevelLabel = academic?.year_level ? `${academic.year_level}${academic.year_level === 1 ? "st" : academic.year_level === 2 ? "nd" : academic.year_level === 3 ? "rd" : "th"} Year` : "-";
+  const admissionDateLabel = academic?.admission_date
+    ? new Date(academic.admission_date).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
+    : "-";
+
   const getEnrollmentStatusColor = (status: string) => {
     switch (status) {
       case "Regular":
@@ -43,8 +103,8 @@ export default function AcademicProfile() {
               </div>
               <div>
                 <p className="text-sm text-blue-700 font-medium">Current Semester</p>
-                <p className="text-xl font-semibold text-blue-900 mt-0.5">2nd Semester</p>
-                <p className="text-xs text-blue-600 mt-0.5">A.Y. 2025-2026</p>
+                <p className="text-xl font-semibold text-blue-900 mt-0.5">{loading ? "Loading..." : "Active"}</p>
+                <p className="text-xs text-blue-600 mt-0.5">{academic?.enrollment_status || "No status yet"}</p>
               </div>
             </div>
           </CardContent>
@@ -58,8 +118,8 @@ export default function AcademicProfile() {
               </div>
               <div>
                 <p className="text-sm text-green-700 font-medium">Units Enrolled</p>
-                <p className="text-xl font-semibold text-green-900 mt-0.5">21 Units</p>
-                <p className="text-xs text-green-600 mt-0.5">7 Subjects</p>
+                <p className="text-xl font-semibold text-green-900 mt-0.5">{courses.length * 3} Units</p>
+                <p className="text-xs text-green-600 mt-0.5">{courses.length} Subjects</p>
               </div>
             </div>
           </CardContent>
@@ -73,8 +133,8 @@ export default function AcademicProfile() {
               </div>
               <div>
                 <p className="text-sm text-purple-700 font-medium">Cumulative GPA</p>
-                <p className="text-xl font-semibold text-purple-900 mt-0.5">3.75</p>
-                <p className="text-xs text-purple-600 mt-0.5">Dean's List</p>
+                <p className="text-xl font-semibold text-purple-900 mt-0.5">{cumulativeGpa}</p>
+                <p className="text-xs text-purple-600 mt-0.5">{grades.length > 0 ? "Based on recorded grades" : "No grades yet"}</p>
               </div>
             </div>
           </CardContent>
@@ -101,19 +161,19 @@ export default function AcademicProfile() {
                     <BookOpen className="h-3 w-3" />
                     Program
                   </label>
-                  <p className="text-gray-900 font-medium">{mockAcademicProfile.program}</p>
+                  <p className="text-gray-900 font-medium">{academic?.program || "-"}</p>
                 </div>
 
                 <div className="space-y-2 p-4 rounded-lg bg-gray-50 border border-gray-100">
                   <label className="text-xs uppercase tracking-wide font-medium text-gray-500">Major</label>
-                  <p className="text-gray-900 font-medium">{mockAcademicProfile.major}</p>
+                  <p className="text-gray-900 font-medium">{academic?.major || academic?.track || "-"}</p>
                 </div>
 
                 <div className="space-y-2 p-4 rounded-lg bg-gray-50 border border-gray-100">
                   <label className="text-xs uppercase tracking-wide font-medium text-gray-500">
                     Year Level
                   </label>
-                  <p className="text-gray-900 font-medium">{mockAcademicProfile.yearLevel}</p>
+                  <p className="text-gray-900 font-medium">{yearLevelLabel}</p>
                 </div>
 
                 <div className="space-y-2 p-4 rounded-lg bg-gray-50 border border-gray-100">
@@ -121,7 +181,7 @@ export default function AcademicProfile() {
                     <Users className="h-3 w-3" />
                     Section
                   </label>
-                  <p className="text-gray-900 font-medium">{mockAcademicProfile.section}</p>
+                  <p className="text-gray-900 font-medium">{academic?.section || "-"}</p>
                 </div>
 
                 <div className="space-y-2 p-4 rounded-lg bg-gray-50 border border-gray-100">
@@ -129,7 +189,7 @@ export default function AcademicProfile() {
                     <Calendar className="h-3 w-3" />
                     Date Admitted
                   </label>
-                  <p className="text-gray-900 font-medium">{mockAcademicProfile.dateAdmitted}</p>
+                  <p className="text-gray-900 font-medium">{admissionDateLabel}</p>
                 </div>
               </div>
             </div>
@@ -143,7 +203,7 @@ export default function AcademicProfile() {
                     <Award className="h-3 w-3" />
                     Scholarship Type
                   </label>
-                  <p className="text-gray-900 font-medium">{mockAcademicProfile.scholarshipType}</p>
+                  <p className="text-gray-900 font-medium">{academic?.scholarship_type || "-"}</p>
                 </div>
 
                 <div className="space-y-2 p-4 rounded-lg bg-green-50 border border-green-100">
@@ -154,10 +214,10 @@ export default function AcademicProfile() {
                     <Badge
                       variant="outline"
                       className={getEnrollmentStatusColor(
-                        mockAcademicProfile.enrollmentStatus
+                        academic?.enrollment_status || "Unknown"
                       )}
                     >
-                      {mockAcademicProfile.enrollmentStatus}
+                      {academic?.enrollment_status || "Unknown"}
                     </Badge>
                   </div>
                 </div>

@@ -3,7 +3,8 @@ import { api } from '../utils/api';
 
 interface User {
   id: string;
-  username: string;
+  email: string;
+  name: string;
   role: string;
   refId: string;
 }
@@ -11,7 +12,7 @@ interface User {
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
-  login: (username: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
 }
 
@@ -31,11 +32,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   });
 
-  const login = async (username: string, password: string): Promise<{ success: boolean; error?: string }> => {
+  const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      const data = await api.post<{ user: { user_id: number; user_type: string; username: string; ref_id: string } }>(
+      const normalizedEmail = email.trim().toLowerCase();
+      const data = await api.post<{ user: { user_id: number; user_type: string; username: string; ref_id: string; display_name?: string } }>(
         '/auth/login',
-        { username, password }
+        { username: normalizedEmail, password }
       );
 
       if (data.user.user_type !== 'Student') {
@@ -44,7 +46,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const loggedInUser: User = {
         id: String(data.user.user_id),
-        username: data.user.username,
+        email: data.user.username,
+        name: data.user.display_name || data.user.username,
         role: data.user.user_type,
         refId: data.user.ref_id,
       };

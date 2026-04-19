@@ -2,7 +2,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Calendar } from "../components/ui/calendar";
 import { AlertCircle, Calendar as CalendarIcon, TrendingUp, BookOpen, Bell } from "lucide-react";
 import { Badge } from "../components/ui/badge";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { api } from "../utils/api";
+import { useAuth } from "../context/AuthContext";
+import buildingImage from "../../assets/b65a68daf197ee46f7b02d7da02ee101a668ac79.png";
 
 const mockViolations = [
   {
@@ -40,7 +43,22 @@ const mockEvents = [
 ];
 
 export default function Dashboard() {
+  const { user } = useAuth();
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
+  const [summary, setSummary] = useState<{
+    total_subjects: number;
+    average_final_grade: number | null;
+    total_schedules: number;
+    registered_events: number;
+  } | null>(null);
+  const [student, setStudent] = useState<{
+    student_id: string;
+    first_name: string;
+    last_name: string;
+    year_level: number | null;
+    section: string | null;
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
 
   const getSeverityColor = (severity: string) => {
     switch (severity) {
@@ -56,9 +74,9 @@ export default function Dashboard() {
   const getEventTypeColor = (type: string) => {
     switch (type) {
       case "Academic":
-        return "bg-blue-50 border-blue-200";
+        return "bg-orange-50 border-orange-200";
       case "Event":
-        return "bg-purple-50 border-purple-200";
+        return "bg-amber-50 border-amber-200";
       case "Deadline":
         return "bg-yellow-50 border-yellow-200";
       default:
@@ -69,9 +87,9 @@ export default function Dashboard() {
   const getEventTypeTextColor = (type: string) => {
     switch (type) {
       case "Academic":
-        return "text-blue-600";
+        return "text-orange-600";
       case "Event":
-        return "text-purple-600";
+        return "text-amber-600";
       case "Deadline":
         return "text-orange-600";
       default:
@@ -79,6 +97,62 @@ export default function Dashboard() {
     }
   };
 
+  useEffect(() => {
+    if (!user?.refId) {
+      setLoading(false);
+      return;
+    }
+
+    let isMounted = true;
+    setLoading(true);
+
+    api
+      .get<{
+        student: {
+          student_id: string;
+          first_name: string;
+          last_name: string;
+          year_level: number | null;
+          section: string | null;
+        };
+        summary: {
+          total_subjects: number;
+          average_final_grade: number | null;
+          total_schedules: number;
+          registered_events: number;
+        };
+      }>(`/students/${encodeURIComponent(user.refId)}/dashboard`)
+      .then((data) => {
+        if (!isMounted) return;
+        setStudent(data.student);
+        setSummary(data.summary);
+      })
+      .catch(() => {
+        if (!isMounted) return;
+        setStudent(null);
+        setSummary(null);
+      })
+      .finally(() => {
+        if (!isMounted) return;
+        setLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user?.refId]);
+
+  const displayName = useMemo(() => {
+    if (!student) return user?.name || "Student";
+    return `${student.first_name} ${student.last_name}`.trim();
+  }, [student, user?.name]);
+
+  const displayMeta = useMemo(() => {
+    if (!student) return `Student ID: ${user?.refId || "N/A"}`;
+    return `Student ID: ${student.student_id} • Year ${student.year_level ?? "-"} • Section ${student.section || "-"}`;
+  }, [student, user?.refId]);
+
+  const currentGpa = summary?.average_final_grade != null ? summary.average_final_grade.toFixed(2) : "-";
   const eventDates = mockEvents.map(event => event.date);
 
   const upcomingEvents = mockEvents
@@ -88,13 +162,24 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-3xl font-semibold text-gray-900">Welcome Back, Maria</h1>
-          <p className="mt-1 text-sm text-gray-500">Student ID: 2024-00123 • Year 3 • Section CS-3A</p>
+      <div className="relative overflow-hidden rounded-2xl border border-gray-200">
+        <img src={buildingImage} alt="Campus" className="h-44 w-full object-cover" />
+        <div className="absolute inset-0 bg-gradient-to-r from-gray-900/80 to-gray-900/50" />
+        <div className="absolute inset-0 flex items-end justify-between p-6">
+          <div>
+            <h1 className="text-3xl font-semibold text-white">Welcome Back, {displayName}</h1>
+            <p className="mt-1 text-sm text-gray-100">{loading ? "Loading student dashboard..." : displayMeta}</p>
+          </div>
         </div>
-        <button className="relative p-2 text-gray-400 hover:text-gray-600">
+      </div>
+
+      <div className="flex justify-end">
+        <button
+          type="button"
+          aria-label="Notifications"
+          title="Notifications"
+          className="relative p-2 text-gray-400 hover:text-gray-600"
+        >
           <Bell className="h-6 w-6" />
           <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
         </button>
@@ -102,15 +187,15 @@ export default function Dashboard() {
 
       {/* Stats Cards */}
       <div className="grid gap-4 md:grid-cols-3">
-        <Card className="border-blue-100 bg-white hover:shadow-md transition-shadow">
+        <Card className="border-orange-100 bg-white hover:shadow-md transition-shadow">
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-600">Current GPA</p>
-                <p className="text-4xl font-semibold text-blue-600 mt-2">3.75</p>
+                <p className="text-4xl font-semibold text-orange-600 mt-2">{currentGpa}</p>
               </div>
-              <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center">
-                <TrendingUp className="h-6 w-6 text-blue-600" />
+              <div className="w-12 h-12 rounded-xl bg-orange-100 flex items-center justify-center">
+                <TrendingUp className="h-6 w-6 text-orange-600" />
               </div>
             </div>
           </CardContent>
@@ -130,15 +215,15 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        <Card className="border-purple-100 bg-white hover:shadow-md transition-shadow">
+        <Card className="border-amber-100 bg-white hover:shadow-md transition-shadow">
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-600">Courses</p>
-                <p className="text-4xl font-semibold text-purple-600 mt-2">7</p>
+                <p className="text-4xl font-semibold text-amber-600 mt-2">{summary?.total_subjects ?? 0}</p>
               </div>
-              <div className="w-12 h-12 rounded-xl bg-purple-100 flex items-center justify-center">
-                <BookOpen className="h-6 w-6 text-purple-600" />
+              <div className="w-12 h-12 rounded-xl bg-amber-100 flex items-center justify-center">
+                <BookOpen className="h-6 w-6 text-amber-600" />
               </div>
             </div>
           </CardContent>
@@ -181,7 +266,7 @@ export default function Dashboard() {
                 </p>
               </div>
             ))}
-            <button className="text-sm text-blue-600 hover:text-blue-700 font-medium w-full text-center py-2">
+            <button className="text-sm text-orange-600 hover:text-orange-700 font-medium w-full text-center py-2">
               View All Violations →
             </button>
           </CardContent>
@@ -228,7 +313,7 @@ export default function Dashboard() {
                     key={day}
                     className={`py-1.5 rounded ${
                       hasEvent 
-                        ? "bg-blue-600 text-white font-medium" 
+                        ? "bg-orange-500 text-white font-medium" 
                         : day === 3 
                         ? "bg-gray-200 text-gray-900 font-medium" 
                         : "text-gray-700"

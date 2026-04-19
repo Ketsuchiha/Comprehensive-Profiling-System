@@ -46,11 +46,11 @@ export function Register() {
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 relative overflow-hidden">
       {/* Background Image */}
-      <div 
-        className="absolute inset-0 z-0 bg-cover bg-center opacity-10"
-        style={{
-          backgroundImage: `url(${buildingImage})`,
-        }}
+      <img
+        src={buildingImage}
+        alt=""
+        aria-hidden="true"
+        className="absolute inset-0 z-0 h-full w-full object-cover opacity-10"
       />
 
       <div className="w-full max-w-md relative z-10">

@@ -2,83 +2,116 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Lock, Mail, AlertCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import logoImage from '../../assets/70c26a9cf9f6ef2d16948997d7c954b67149d16d.png';
+import buildingImage from '../../assets/b65a68daf197ee46f7b02d7da02ee101a668ac79.png';
 
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError('');
-    setLoading(true);
+    setIsLoading(true);
 
     const result = await login(email, password);
-    setLoading(false);
 
     if (!result.success) {
-      setError(result.error || 'Invalid credentials');
+      setError(result.error || 'Invalid email or password');
+      setIsLoading(false);
       return;
     }
 
+    setIsLoading(false);
     navigate('/');
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
-      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-        <h1 className="text-2xl font-bold text-slate-900">Student Portal Login</h1>
-        <p className="mt-1 text-sm text-slate-600">Sign in using your student account.</p>
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 relative overflow-hidden">
+      <img
+        src={buildingImage}
+        alt=""
+        aria-hidden="true"
+        className="absolute inset-0 z-0 h-full w-full object-cover opacity-10"
+      />
 
-        <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
-          {error && (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 flex items-center gap-2">
-              <AlertCircle className="h-4 w-4" />
-              <span>{error}</span>
+      <div className="w-full max-w-md relative z-10">
+        <div className="text-center mb-8">
+          <div className="flex justify-center mb-4">
+            <img src={logoImage} alt="CCS Logo" className="w-24 h-24" />
+          </div>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">CCS Student</h1>
+          <p className="text-gray-600">Comprehensive Profiling System</p>
+        </div>
+
+        <div className="bg-white rounded-lg shadow-md p-8">
+          <h2 className="text-2xl font-semibold text-gray-900 mb-6">Login</h2>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {error && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-center gap-2 text-red-700">
+                <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                <p className="text-sm">{error}</p>
+              </div>
+            )}
+
+            <div>
+              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
+                Email Address
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Mail className="h-5 w-5 text-gray-400" />
+                </div>
+                <input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  placeholder="you@example.com"
+                />
+              </div>
             </div>
-          )}
 
-          <label className="block">
-            <span className="mb-1 block text-sm font-medium text-slate-700">Email</span>
-            <div className="relative">
-              <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 outline-none focus:border-blue-500"
-                placeholder="student@school.edu"
-              />
+            <div>
+              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
+                Password
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Lock className="h-5 w-5 text-gray-400" />
+                </div>
+                <input
+                  id="password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  placeholder="••••••••"
+                />
+              </div>
             </div>
-          </label>
 
-          <label className="block">
-            <span className="mb-1 block text-sm font-medium text-slate-700">Password</span>
-            <div className="relative">
-              <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 outline-none focus:border-blue-500"
-                placeholder="Enter your password"
-              />
-            </div>
-          </label>
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full bg-orange-500 text-white py-2 px-4 rounded-lg hover:bg-orange-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+            >
+              {isLoading ? 'Signing in...' : 'Sign In'}
+            </button>
+          </form>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {loading ? 'Signing in...' : 'Sign In'}
-          </button>
-        </form>
+          <div className="mt-6 text-center">
+            <p className="text-sm text-gray-600">Use the email and temporary password provided by the admin.</p>
+          </div>
+        </div>
       </div>
     </div>
   );

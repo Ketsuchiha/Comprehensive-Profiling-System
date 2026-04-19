@@ -11,6 +11,8 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
+import logoImage from "../../assets/70c26a9cf9f6ef2d16948997d7c954b67149d16d.png";
+import buildingImage from "../../assets/b65a68daf197ee46f7b02d7da02ee101a668ac79.png";
 
 export default function Layout() {
   const location = useLocation();
@@ -18,7 +20,7 @@ export default function Layout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { user, logout } = useAuth();
 
-  const displayName = user?.username || "Student";
+  const displayName = user?.name || user?.email || "Student";
   const displayRefId = user?.refId || "N/A";
   const initials = displayName
     .split(/[\s.@_-]+/)
@@ -46,12 +48,10 @@ export default function Layout() {
       <aside className="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-64 lg:flex-col">
         <div className="flex grow flex-col gap-y-5 overflow-y-auto bg-white border-r border-gray-200 px-6 pb-4">
           {/* Logo/Brand */}
-          <div className="flex h-20 shrink-0 items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-blue-600 flex items-center justify-center">
-              <span className="text-white font-semibold text-lg">SH</span>
-            </div>
+          <div className="flex h-20 shrink-0 items-center gap-3 border-b border-gray-200">
+            <img src={logoImage} alt="CCS Logo" className="w-12 h-12" />
             <div>
-              <h1 className="font-semibold text-gray-900">StudentHub</h1>
+              <h1 className="font-semibold text-gray-900">CCS Student</h1>
               <p className="text-xs text-gray-500">Dashboard</p>
             </div>
           </div>
@@ -67,13 +67,13 @@ export default function Layout() {
                           to={item.href}
                           className={`group flex gap-x-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${
                             isActive
-                              ? "bg-blue-600 text-white shadow-sm"
-                              : "text-gray-700 hover:text-blue-600 hover:bg-gray-50"
+                              ? "bg-orange-500 text-white shadow-sm"
+                              : "text-gray-700 hover:text-orange-600 hover:bg-gray-50"
                           }`}
                         >
                           <item.icon
                             className={`h-5 w-5 shrink-0 ${
-                              isActive ? "text-white" : "text-gray-400 group-hover:text-blue-600"
+                              isActive ? "text-white" : "text-gray-400 group-hover:text-orange-600"
                             }`}
                           />
                           {item.name}
@@ -86,7 +86,7 @@ export default function Layout() {
               {/* User Profile at Bottom */}
               <li className="mt-auto">
                 <div className="flex items-center gap-3 px-3 py-3 border-t border-gray-200">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-pink-400 to-purple-500 flex items-center justify-center">
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-orange-400 to-amber-500 flex items-center justify-center">
                     <span className="text-white font-medium text-sm">{initials}</span>
                   </div>
                   <div className="flex-1 min-w-0">
@@ -119,10 +119,8 @@ export default function Layout() {
             )}
           </button>
           <div className="flex-1 flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
-              <span className="text-white font-semibold text-sm">SH</span>
-            </div>
-            <h1 className="font-semibold text-gray-900">StudentHub</h1>
+            <img src={logoImage} alt="CCS Logo" className="w-8 h-8" />
+            <h1 className="font-semibold text-gray-900">CCS Student</h1>
           </div>
         </div>
 
@@ -130,11 +128,9 @@ export default function Layout() {
           <div className="fixed inset-0 z-30 bg-gray-900/80 lg:hidden" onClick={() => setMobileMenuOpen(false)}>
             <div className="fixed inset-y-0 left-0 w-full max-w-xs bg-white" onClick={(e) => e.stopPropagation()}>
               <div className="flex h-16 shrink-0 items-center px-6 border-b border-gray-200 gap-3">
-                <div className="w-10 h-10 rounded-lg bg-blue-600 flex items-center justify-center">
-                  <span className="text-white font-semibold text-lg">SH</span>
-                </div>
+                <img src={logoImage} alt="CCS Logo" className="w-10 h-10" />
                 <div>
-                  <h1 className="font-semibold text-gray-900">StudentHub</h1>
+                  <h1 className="font-semibold text-gray-900">CCS Student</h1>
                   <p className="text-xs text-gray-500">Dashboard</p>
                 </div>
               </div>
@@ -149,13 +145,13 @@ export default function Layout() {
                           onClick={() => setMobileMenuOpen(false)}
                           className={`group flex gap-x-3 rounded-lg px-3 py-2.5 text-sm font-medium ${
                             isActive
-                              ? "bg-blue-600 text-white"
-                              : "text-gray-700 hover:text-blue-600 hover:bg-gray-50"
+                              ? "bg-orange-500 text-white"
+                              : "text-gray-700 hover:text-orange-600 hover:bg-gray-50"
                           }`}
                         >
                           <item.icon
                             className={`h-5 w-5 shrink-0 ${
-                              isActive ? "text-white" : "text-gray-400 group-hover:text-blue-600"
+                              isActive ? "text-white" : "text-gray-400 group-hover:text-orange-600"
                             }`}
                           />
                           {item.name}
@@ -179,7 +175,13 @@ export default function Layout() {
 
       {/* Main content */}
       <main className="lg:pl-64">
-        <div className="px-4 py-6 sm:px-6 lg:px-8">
+        <div className="relative px-4 py-6 sm:px-6 lg:px-8">
+          <img
+            src={buildingImage}
+            alt=""
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 -z-10 h-full w-full object-cover opacity-[0.04]"
+          />
           <Outlet />
         </div>
       </main>

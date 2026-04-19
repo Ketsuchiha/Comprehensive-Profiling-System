@@ -43,8 +43,8 @@ export function Layout() {
             <div className="flex items-center gap-3">
               <img src={logoImage} alt="CCS Logo" className="w-12 h-12" />
               <div>
-                <p className="font-semibold text-gray-900">CCS</p>
-                <p className="text-xs text-gray-600">Profiling System</p>
+                <p className="font-semibold text-gray-900">CCS Admin</p>
+                <p className="text-xs text-gray-600">Dashboard</p>
               </div>
             </div>
           </div>

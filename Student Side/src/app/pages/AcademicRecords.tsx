@@ -10,142 +10,27 @@ import {
 import { BookOpen, TrendingUp, Award } from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { useEffect, useMemo, useState } from "react";
+import { api } from "../utils/api";
+import { useAuth } from "../context/AuthContext";
 
-const mockAcademicRecords = [
-  // First Year - First Semester
-  {
-    subjectCode: "CS 101",
-    subjectName: "Introduction to Computing",
-    semester: "1st Semester",
-    academicYear: "2023-2024",
-    finalGrade: 1.25,
-  },
-  {
-    subjectCode: "MATH 101",
-    subjectName: "College Algebra",
-    semester: "1st Semester",
-    academicYear: "2023-2024",
-    finalGrade: 1.50,
-  },
-  {
-    subjectCode: "ENG 101",
-    subjectName: "Communication Skills",
-    semester: "1st Semester",
-    academicYear: "2023-2024",
-    finalGrade: 1.75,
-  },
-  {
-    subjectCode: "PE 101",
-    subjectName: "Physical Education 1",
-    semester: "1st Semester",
-    academicYear: "2023-2024",
-    finalGrade: 1.50,
-  },
-  // First Year - Second Semester
-  {
-    subjectCode: "CS 102",
-    subjectName: "Computer Programming 1",
-    semester: "2nd Semester",
-    academicYear: "2023-2024",
-    finalGrade: 1.00,
-  },
-  {
-    subjectCode: "MATH 102",
-    subjectName: "Trigonometry",
-    semester: "2nd Semester",
-    academicYear: "2023-2024",
-    finalGrade: 1.25,
-  },
-  {
-    subjectCode: "PHYS 101",
-    subjectName: "Physics for Engineers",
-    semester: "2nd Semester",
-    academicYear: "2023-2024",
-    finalGrade: 1.50,
-  },
-  {
-    subjectCode: "HIST 101",
-    subjectName: "Philippine History",
-    semester: "2nd Semester",
-    academicYear: "2023-2024",
-    finalGrade: 1.75,
-  },
-  // Second Year - First Semester
-  {
-    subjectCode: "CS 201",
-    subjectName: "Data Structures and Algorithms",
-    semester: "1st Semester",
-    academicYear: "2024-2025",
-    finalGrade: 1.25,
-  },
-  {
-    subjectCode: "CS 202",
-    subjectName: "Object-Oriented Programming",
-    semester: "1st Semester",
-    academicYear: "2024-2025",
-    finalGrade: 1.00,
-  },
-  {
-    subjectCode: "MATH 201",
-    subjectName: "Discrete Mathematics",
-    semester: "1st Semester",
-    academicYear: "2024-2025",
-    finalGrade: 1.50,
-  },
-  {
-    subjectCode: "DB 201",
-    subjectName: "Database Management Systems",
-    semester: "1st Semester",
-    academicYear: "2024-2025",
-    finalGrade: 1.25,
-  },
-  // Second Year - Second Semester
-  {
-    subjectCode: "CS 203",
-    subjectName: "Web Development",
-    semester: "2nd Semester",
-    academicYear: "2024-2025",
-    finalGrade: 1.00,
-  },
-  {
-    subjectCode: "CS 204",
-    subjectName: "Computer Networks",
-    semester: "2nd Semester",
-    academicYear: "2024-2025",
-    finalGrade: 1.50,
-  },
-  {
-    subjectCode: "SE 201",
-    subjectName: "Software Engineering",
-    semester: "2nd Semester",
-    academicYear: "2024-2025",
-    finalGrade: 1.25,
-  },
-  // Third Year - First Semester
-  {
-    subjectCode: "CS 301",
-    subjectName: "Machine Learning",
-    semester: "1st Semester",
-    academicYear: "2025-2026",
-    finalGrade: 1.25,
-  },
-  {
-    subjectCode: "CS 302",
-    subjectName: "Mobile Application Development",
-    semester: "1st Semester",
-    academicYear: "2025-2026",
-    finalGrade: 1.00,
-  },
-  {
-    subjectCode: "CS 303",
-    subjectName: "Operating Systems",
-    semester: "1st Semester",
-    academicYear: "2025-2026",
-    finalGrade: 1.50,
-  },
-];
+type GradeRecord = {
+  subject_code: string;
+  subject_name: string | null;
+  semester: string | null;
+  academic_year: string | null;
+  final_grade: number | null;
+};
 
-const calculateGPA = (records: typeof mockAcademicRecords) => {
+type ViewGrade = {
+  subjectCode: string;
+  subjectName: string;
+  semester: string;
+  academicYear: string;
+  finalGrade: number;
+};
+
+const calculateGPA = (records: ViewGrade[]) => {
   if (records.length === 0) return 0;
   const sum = records.reduce((acc, record) => acc + record.finalGrade, 0);
   return (sum / records.length).toFixed(2);
@@ -158,8 +43,8 @@ const getGradeColor = (grade: number) => {
   return "text-orange-600 font-semibold";
 };
 
-const groupByAcademicYear = (records: typeof mockAcademicRecords) => {
-  const grouped: { [key: string]: typeof mockAcademicRecords } = {};
+const groupByAcademicYear = (records: ViewGrade[]) => {
+  const grouped: { [key: string]: ViewGrade[] } = {};
   records.forEach((record) => {
     if (!grouped[record.academicYear]) {
       grouped[record.academicYear] = [];
@@ -170,8 +55,52 @@ const groupByAcademicYear = (records: typeof mockAcademicRecords) => {
 };
 
 export default function AcademicRecords() {
-  const groupedRecords = groupByAcademicYear(mockAcademicRecords);
-  const overallGPA = calculateGPA(mockAcademicRecords);
+  const { user } = useAuth();
+  const [records, setRecords] = useState<ViewGrade[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!user?.refId) {
+      setLoading(false);
+      return;
+    }
+
+    let isMounted = true;
+    setLoading(true);
+
+    api
+      .get<GradeRecord[]>(`/students/${encodeURIComponent(user.refId)}/grades`)
+      .then((rows) => {
+        if (!isMounted) return;
+        const normalized = rows
+          .filter((row) => typeof row.final_grade === "number")
+          .map((row) => ({
+            subjectCode: row.subject_code,
+            subjectName: row.subject_name || row.subject_code,
+            semester: row.semester || "N/A",
+            academicYear: row.academic_year || "Unknown",
+            finalGrade: Number(row.final_grade),
+          }));
+        setRecords(normalized);
+      })
+      .catch(() => {
+        if (!isMounted) return;
+        setRecords([]);
+      })
+      .finally(() => {
+        if (!isMounted) return;
+        setLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user?.refId]);
+
+  const groupedRecords = useMemo(() => groupByAcademicYear(records), [records]);
+  const overallGPA = calculateGPA(records);
+  const tabYears = useMemo(() => Object.keys(groupedRecords).sort().reverse(), [groupedRecords]);
+  const defaultYear = tabYears[0] || "empty";
 
   return (
     <div className="space-y-6">
@@ -191,7 +120,7 @@ export default function AcademicRecords() {
               <div>
                 <p className="text-sm text-blue-700 font-medium">Total Subjects</p>
                 <p className="text-2xl font-semibold text-blue-900 mt-0.5">
-                  {mockAcademicRecords.length}
+                  {records.length}
                 </p>
               </div>
             </div>
@@ -220,7 +149,7 @@ export default function AcademicRecords() {
               </div>
               <div>
                 <p className="text-sm text-purple-700 font-medium">Academic Standing</p>
-                <p className="text-lg font-semibold text-purple-900 mt-0.5">Dean's List</p>
+                <p className="text-lg font-semibold text-purple-900 mt-0.5">{records.length ? "Recorded" : "No records"}</p>
               </div>
             </div>
           </CardContent>
@@ -233,9 +162,14 @@ export default function AcademicRecords() {
           <CardTitle>Grade Records</CardTitle>
         </CardHeader>
         <CardContent className="pt-6">
-          <Tabs defaultValue={Object.keys(groupedRecords)[Object.keys(groupedRecords).length - 1]}>
+          {loading ? (
+            <p className="text-sm text-gray-500">Loading academic records...</p>
+          ) : records.length === 0 ? (
+            <p className="text-sm text-gray-500">No academic records available yet.</p>
+          ) : (
+          <Tabs defaultValue={defaultYear}>
             <TabsList className="grid w-full grid-cols-3 mb-6">
-              {Object.keys(groupedRecords).sort().reverse().map((year) => (
+              {tabYears.map((year) => (
                 <TabsTrigger key={year} value={year} className="data-[state=active]:bg-blue-600 data-[state=active]:text-white">
                   A.Y. {year}
                 </TabsTrigger>
@@ -337,6 +271,7 @@ export default function AcademicRecords() {
               );
             })}
           </Tabs>
+          )}
         </CardContent>
       </Card>
     </div>

@@ -14,9 +14,9 @@ function normalizeDateInput(value) {
   return trimmed;
 }
 
-function generateDefaultPassword(middleName, birthDate) {
-  const initial = (typeof middleName === 'string' && middleName.trim())
-    ? middleName.trim().charAt(0).toUpperCase()
+function generateDefaultPassword(lastName, birthDate) {
+  const initial = (typeof lastName === 'string' && lastName.trim())
+    ? lastName.trim().charAt(0).toUpperCase()
     : 'X';
   return `${initial}${birthDate}`;
 }
@@ -218,7 +218,7 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'A valid birth_date is required' });
     }
 
-    const generatedPassword = generateDefaultPassword(middle_name, normalizedBirthDate);
+    const generatedPassword = generateDefaultPassword(last_name, normalizedBirthDate);
 
     const includeSkillsColumn = await hasStudentSkillsColumn();
     const includePasswordColumn = await hasStudentPasswordColumn();
@@ -450,8 +450,28 @@ router.put('/:id', async (req, res) => {
     );
 
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Student not found' });
+
+    // Keep student portal login in sync when admin updates the student email.
+    const [studentRows] = await pool.query(
+      'SELECT email FROM students WHERE student_id = ? LIMIT 1',
+      [id]
+    );
+    if (studentRows.length > 0) {
+      const normalizedEmail = normalizeOptionalString(studentRows[0].email, { toLower: true });
+      const resolvedUsername = normalizedEmail || id;
+      await pool.query(
+        `UPDATE users
+         SET username = ?, is_active = 1
+         WHERE ref_id = ? AND user_type = 'Student'`,
+        [resolvedUsername, id]
+      );
+    }
+
     res.json({ message: 'Student updated successfully' });
   } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ error: 'Email is already linked to another account' });
+    }
     res.status(500).json({ error: err.message });
   }
 });

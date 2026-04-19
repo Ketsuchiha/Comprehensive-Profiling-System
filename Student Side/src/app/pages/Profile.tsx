@@ -1,23 +1,91 @@
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { User, Mail, Phone, MapPin, AlertCircle, Camera } from "lucide-react";
 import { Badge } from "../components/ui/badge";
+import { useEffect, useMemo, useState } from "react";
+import { api } from "../utils/api";
+import { useAuth } from "../context/AuthContext";
 
-const mockStudentProfile = {
-  studentId: "2024-00123",
-  firstName: "Maria",
-  middleName: "Santos",
-  lastName: "Cruz",
-  sex: "Female",
-  nationality: "Filipino",
-  contactNumber: "+63 912 345 6789",
-  email: "maria.cruz@university.edu",
-  address: "123 Main Street, Quezon City, Metro Manila, 1100",
-  emergencyContactPerson: "Juan Cruz (Father)",
-  emergencyNumber: "+63 917 123 4567",
-  profilePhoto: "https://images.unsplash.com/photo-1600178572204-6ac8886aae63?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBzdHVkZW50JTIwcG9ydHJhaXR8ZW58MXx8fHwxNzcyNDUzNjY0fDA&ixlib=rb-4.1.0&q=80&w=1080",
+type StudentRecord = {
+  student_id: string;
+  first_name: string;
+  middle_name: string | null;
+  last_name: string;
+  sex: string | null;
+  nationality: string | null;
+  contact_number: string | null;
+  email: string | null;
+  address: string | null;
+  emergency_contact: string | null;
+  emergency_contact_num: string | null;
+  profile_photo: string | null;
 };
 
+const fallbackProfilePhoto = "https://images.unsplash.com/photo-1600178572204-6ac8886aae63?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBzdHVkZW50JTIwcG9ydHJhaXR8ZW58MXx8fHwxNzcyNDUzNjY0fDA&ixlib=rb-4.1.0&q=80&w=1080";
+
 export default function Profile() {
+  const { user } = useAuth();
+  const [student, setStudent] = useState<StudentRecord | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!user?.refId) {
+      setLoading(false);
+      setError("No student ID found for this session.");
+      return;
+    }
+
+    let isMounted = true;
+    setLoading(true);
+    setError("");
+
+    api
+      .get<StudentRecord>(`/students/${encodeURIComponent(user.refId)}`)
+      .then((data) => {
+        if (!isMounted) return;
+        setStudent(data);
+      })
+      .catch((err) => {
+        if (!isMounted) return;
+        setError(err instanceof Error ? err.message : "Failed to load student profile.");
+      })
+      .finally(() => {
+        if (!isMounted) return;
+        setLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user?.refId]);
+
+  const fullName = useMemo(() => {
+    if (!student) return user?.name || "Student";
+    return [student.first_name, student.middle_name, student.last_name].filter(Boolean).join(" ");
+  }, [student, user?.name]);
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-semibold text-gray-900">Student Profile</h1>
+          <p className="mt-1 text-sm text-gray-500">Loading your profile...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !student) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-semibold text-gray-900">Student Profile</h1>
+          <p className="mt-1 text-sm text-red-600">{error || "Student profile not found."}</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -35,22 +103,24 @@ export default function Profile() {
             <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6">
               <div className="relative">
                 <img
-                  src={mockStudentProfile.profilePhoto}
+                  src={student.profile_photo || fallbackProfilePhoto}
                   alt="Profile"
                   className="w-32 h-32 rounded-full object-cover border-4 border-gray-100 shadow-sm"
                 />
-                <button className="absolute bottom-0 right-0 w-10 h-10 rounded-full bg-blue-600 text-white flex items-center justify-center shadow-lg hover:bg-blue-700 transition-colors">
+                <button
+                  type="button"
+                  aria-label="Change profile photo"
+                  title="Change profile photo"
+                  className="absolute bottom-0 right-0 w-10 h-10 rounded-full bg-blue-600 text-white flex items-center justify-center shadow-lg hover:bg-blue-700 transition-colors"
+                >
                   <Camera className="h-5 w-5" />
                 </button>
               </div>
               <div className="flex-1 text-center sm:text-left">
-                <h2 className="text-2xl font-semibold text-gray-900">
-                  {mockStudentProfile.firstName} {mockStudentProfile.middleName}{" "}
-                  {mockStudentProfile.lastName}
-                </h2>
+                <h2 className="text-2xl font-semibold text-gray-900">{fullName}</h2>
                 <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 mt-3">
                   <Badge className="bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-100">
-                    {mockStudentProfile.studentId}
+                    {student.student_id}
                   </Badge>
                   <Badge className="bg-green-100 text-green-700 border-green-200 hover:bg-green-100">
                     Active Student
@@ -65,40 +135,40 @@ export default function Profile() {
                 <label className="text-xs uppercase tracking-wide font-medium text-gray-500">
                   Student ID
                 </label>
-                <p className="text-gray-900 font-medium">{mockStudentProfile.studentId}</p>
+                <p className="text-gray-900 font-medium">{student.student_id}</p>
               </div>
 
               <div className="space-y-2 p-4 rounded-lg bg-gray-50">
                 <label className="text-xs uppercase tracking-wide font-medium text-gray-500">
                   First Name
                 </label>
-                <p className="text-gray-900 font-medium">{mockStudentProfile.firstName}</p>
+                <p className="text-gray-900 font-medium">{student.first_name || "-"}</p>
               </div>
 
               <div className="space-y-2 p-4 rounded-lg bg-gray-50">
                 <label className="text-xs uppercase tracking-wide font-medium text-gray-500">
                   Middle Name
                 </label>
-                <p className="text-gray-900 font-medium">{mockStudentProfile.middleName}</p>
+                <p className="text-gray-900 font-medium">{student.middle_name || "-"}</p>
               </div>
 
               <div className="space-y-2 p-4 rounded-lg bg-gray-50">
                 <label className="text-xs uppercase tracking-wide font-medium text-gray-500">
                   Last Name
                 </label>
-                <p className="text-gray-900 font-medium">{mockStudentProfile.lastName}</p>
+                <p className="text-gray-900 font-medium">{student.last_name || "-"}</p>
               </div>
 
               <div className="space-y-2 p-4 rounded-lg bg-gray-50">
                 <label className="text-xs uppercase tracking-wide font-medium text-gray-500">Sex</label>
-                <p className="text-gray-900 font-medium">{mockStudentProfile.sex}</p>
+                <p className="text-gray-900 font-medium">{student.sex || "-"}</p>
               </div>
 
               <div className="space-y-2 p-4 rounded-lg bg-gray-50">
                 <label className="text-xs uppercase tracking-wide font-medium text-gray-500">
                   Nationality
                 </label>
-                <p className="text-gray-900 font-medium">{mockStudentProfile.nationality}</p>
+                <p className="text-gray-900 font-medium">{student.nationality || "-"}</p>
               </div>
             </div>
 
@@ -116,7 +186,7 @@ export default function Profile() {
                     <Phone className="h-3 w-3" />
                     Contact Number
                   </label>
-                  <p className="text-gray-900 font-medium">{mockStudentProfile.contactNumber}</p>
+                  <p className="text-gray-900 font-medium">{student.contact_number || "-"}</p>
                 </div>
 
                 <div className="space-y-2 p-4 rounded-lg bg-gray-50 border border-gray-100">
@@ -124,7 +194,7 @@ export default function Profile() {
                     <Mail className="h-3 w-3" />
                     Email Address
                   </label>
-                  <p className="text-gray-900 font-medium">{mockStudentProfile.email}</p>
+                  <p className="text-gray-900 font-medium">{student.email || "-"}</p>
                 </div>
 
                 <div className="space-y-2 p-4 rounded-lg bg-gray-50 border border-gray-100 sm:col-span-2">
@@ -132,7 +202,7 @@ export default function Profile() {
                     <MapPin className="h-3 w-3" />
                     Address
                   </label>
-                  <p className="text-gray-900 font-medium">{mockStudentProfile.address}</p>
+                  <p className="text-gray-900 font-medium">{student.address || "-"}</p>
                 </div>
               </div>
             </div>
@@ -150,18 +220,14 @@ export default function Profile() {
                   <label className="text-xs uppercase tracking-wide font-medium text-red-600">
                     Emergency Contact Person
                   </label>
-                  <p className="text-gray-900 font-medium">
-                    {mockStudentProfile.emergencyContactPerson}
-                  </p>
+                  <p className="text-gray-900 font-medium">{student.emergency_contact || "-"}</p>
                 </div>
 
                 <div className="space-y-2 p-4 rounded-lg bg-red-50 border border-red-100">
                   <label className="text-xs uppercase tracking-wide font-medium text-red-600">
                     Emergency Number
                   </label>
-                  <p className="text-gray-900 font-medium">
-                    {mockStudentProfile.emergencyNumber}
-                  </p>
+                  <p className="text-gray-900 font-medium">{student.emergency_contact_num || "-"}</p>
                 </div>
               </div>
             </div>

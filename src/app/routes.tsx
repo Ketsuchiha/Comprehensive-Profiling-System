@@ -6,6 +6,8 @@ import { Events } from "./pages/Events";
 import { Scheduling } from "./pages/Scheduling";
 import { CollegeResearch } from "./pages/CollegeResearch";
 import { Instruments } from "./pages/Instruments";
+import { StudentForm } from "./pages/StudentForm";
+import { StudentDetails } from "./pages/StudentDetails";
 import { Login } from "./pages/Login";
 import { Register } from "./pages/Register";
 import { Layout } from "./components/Layout";
@@ -30,6 +32,9 @@ export const router = createBrowserRouter([
     children: [
       { index: true, Component: Dashboard },
       { path: "students", Component: StudentProfile },
+      { path: "students/new", Component: StudentForm },
+      { path: "students/:studentId", Component: StudentDetails },
+      { path: "students/:studentId/edit", Component: StudentForm },
       { path: "faculty", Component: FacultyProfile },
       { path: "events", Component: Events },
       { path: "scheduling", Component: Scheduling },

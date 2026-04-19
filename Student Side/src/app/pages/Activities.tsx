@@ -1,51 +1,9 @@
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Users, Briefcase, Clock, Award } from "lucide-react";
 import { Badge } from "../components/ui/badge";
-
-const mockOrganizations = [
-  {
-    id: 1,
-    organizationName: "Computer Science Society",
-    position: "Vice President",
-    joinedDate: "August 2024",
-    status: "Active",
-  },
-  {
-    id: 2,
-    organizationName: "Google Developer Student Club",
-    position: "Technical Lead",
-    joinedDate: "September 2024",
-    status: "Active",
-  },
-  {
-    id: 3,
-    organizationName: "Association of Computing Machinery",
-    position: "Member",
-    joinedDate: "August 2023",
-    status: "Active",
-  },
-];
-
-const mockInternships = [
-  {
-    id: 1,
-    company: "Tech Solutions Inc.",
-    position: "Software Development Intern",
-    startDate: "June 2025",
-    endDate: "August 2025",
-    totalHours: 480,
-    status: "Completed",
-  },
-  {
-    id: 2,
-    company: "Digital Innovations Corp.",
-    position: "Web Development Intern",
-    startDate: "December 2025",
-    endDate: "February 2026",
-    totalHours: 320,
-    status: "Ongoing",
-  },
-];
+import { useEffect, useMemo, useState } from "react";
+import { api } from "../utils/api";
+import { useAuth } from "../context/AuthContext";
 
 const mockAchievements = [
   {
@@ -68,7 +26,63 @@ const mockAchievements = [
   },
 ];
 
+type OrgRecord = {
+  org_id: number;
+  organization_name: string;
+  position: string | null;
+  academic_year: string | null;
+};
+
+type InternshipRecord = {
+  internship_id: number;
+  company_name: string;
+  supervisor: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  hours_rendered: number | null;
+};
+
+function formatMonthYear(value: string | null) {
+  if (!value) return "N/A";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
+
 export default function Activities() {
+  const { user } = useAuth();
+  const [organizations, setOrganizations] = useState<OrgRecord[]>([]);
+  const [internships, setInternships] = useState<InternshipRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!user?.refId) {
+      setLoading(false);
+      return;
+    }
+
+    let isMounted = true;
+    setLoading(true);
+
+    Promise.all([
+      api.get<OrgRecord[]>(`/students/${encodeURIComponent(user.refId)}/orgs`).catch(() => []),
+      api.get<InternshipRecord[]>(`/students/${encodeURIComponent(user.refId)}/internships`).catch(() => []),
+    ])
+      .then(([orgs, internshipsData]) => {
+        if (!isMounted) return;
+        setOrganizations(orgs);
+        setInternships(internshipsData);
+      })
+      .finally(() => {
+        if (!isMounted) return;
+        setLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user?.refId]);
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case "Active":
@@ -83,10 +97,10 @@ export default function Activities() {
     }
   };
 
-  const totalInternshipHours = mockInternships.reduce(
-    (sum, internship) => sum + internship.totalHours,
+  const totalInternshipHours = useMemo(() => internships.reduce(
+    (sum, internship) => sum + (internship.hours_rendered || 0),
     0
-  );
+  ), [internships]);
 
   return (
     <div className="space-y-6">
@@ -110,7 +124,7 @@ export default function Activities() {
               <div>
                 <p className="text-sm text-blue-700 font-medium">Organizations</p>
                 <p className="text-2xl font-semibold text-blue-900 mt-0.5">
-                  {mockOrganizations.length}
+                  {organizations.length}
                 </p>
               </div>
             </div>
@@ -126,7 +140,7 @@ export default function Activities() {
               <div>
                 <p className="text-sm text-purple-700 font-medium">Internships</p>
                 <p className="text-2xl font-semibold text-purple-900 mt-0.5">
-                  {mockInternships.length}
+                  {internships.length}
                 </p>
               </div>
             </div>
@@ -161,30 +175,36 @@ export default function Activities() {
           </div>
         </CardHeader>
         <CardContent className="pt-6">
+          {loading ? (
+            <p className="text-sm text-gray-500">Loading organization records...</p>
+          ) : organizations.length === 0 ? (
+            <p className="text-sm text-gray-500">No organization records found.</p>
+          ) : (
           <div className="space-y-3">
-            {mockOrganizations.map((org) => (
+            {organizations.map((org) => (
               <div
-                key={org.id}
+                key={org.org_id}
                 className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border rounded-lg hover:shadow-sm transition-all bg-gray-50"
               >
                 <div className="flex-1">
                   <h4 className="font-semibold text-gray-900">
-                    {org.organizationName}
+                    {org.organization_name}
                   </h4>
-                  <p className="text-sm text-blue-600 font-medium mt-1">{org.position}</p>
+                  <p className="text-sm text-blue-600 font-medium mt-1">{org.position || "Member"}</p>
                   <p className="text-xs text-gray-500 mt-1">
-                    Joined: {org.joinedDate}
+                    Academic Year: {org.academic_year || "N/A"}
                   </p>
                 </div>
                 <Badge
                   variant="outline"
-                  className={`mt-3 sm:mt-0 ${getStatusColor(org.status)} w-fit`}
+                  className={`mt-3 sm:mt-0 ${getStatusColor("Active")} w-fit`}
                 >
-                  {org.status}
+                  Active
                 </Badge>
               </div>
             ))}
           </div>
+          )}
         </CardContent>
       </Card>
 
@@ -199,10 +219,15 @@ export default function Activities() {
           </div>
         </CardHeader>
         <CardContent className="pt-6">
+          {loading ? (
+            <p className="text-sm text-gray-500">Loading internship records...</p>
+          ) : internships.length === 0 ? (
+            <p className="text-sm text-gray-500">No internship records found.</p>
+          ) : (
           <div className="space-y-3">
-            {mockInternships.map((internship) => (
+            {internships.map((internship) => (
               <div
-                key={internship.id}
+                key={internship.internship_id}
                 className="p-4 border rounded-lg hover:shadow-sm transition-all bg-gray-50"
               >
                 <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
@@ -210,35 +235,36 @@ export default function Activities() {
                     <div className="flex items-start justify-between">
                       <div>
                         <h4 className="font-semibold text-gray-900">
-                          {internship.company}
+                          {internship.company_name}
                         </h4>
                         <p className="text-sm text-purple-600 font-medium mt-1">
-                          {internship.position}
+                          {internship.supervisor || "Internship"}
                         </p>
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-3 mt-3 text-xs">
                       <span className="flex items-center gap-1 px-3 py-1 rounded-full bg-white border border-gray-200">
                         <Clock className="h-3 w-3 text-gray-600" />
-                        <span className="font-medium text-gray-700">{internship.totalHours} hours</span>
+                        <span className="font-medium text-gray-700">{internship.hours_rendered || 0} hours</span>
                       </span>
                       <span className="flex items-center gap-1 px-3 py-1 rounded-full bg-white border border-gray-200">
                         <span className="font-medium text-gray-700">
-                          {internship.startDate} - {internship.endDate}
+                          {formatMonthYear(internship.start_date)} - {formatMonthYear(internship.end_date)}
                         </span>
                       </span>
                     </div>
                   </div>
                   <Badge
                     variant="outline"
-                    className={getStatusColor(internship.status)}
+                    className={getStatusColor(internship.end_date ? "Completed" : "Ongoing")}
                   >
-                    {internship.status}
+                    {internship.end_date ? "Completed" : "Ongoing"}
                   </Badge>
                 </div>
               </div>
             ))}
           </div>
+          )}
         </CardContent>
       </Card>
 

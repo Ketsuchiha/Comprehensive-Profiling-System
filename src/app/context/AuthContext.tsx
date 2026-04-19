@@ -76,7 +76,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem('ccs_user', JSON.stringify(userData));
       return { success: true };
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Registration failed';
+      const rawMessage = error instanceof Error ? error.message : 'Registration failed';
+      const normalized = rawMessage.toLowerCase();
+      const message = normalized.includes('econnrefused')
+        ? 'Database is currently unavailable. Please try again in a moment.'
+        : rawMessage;
       return { success: false, error: message };
     }
   };
