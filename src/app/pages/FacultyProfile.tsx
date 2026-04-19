@@ -40,6 +40,28 @@ interface AddFacultyForm {
   yearsOfTeaching: number;
 }
 
+interface EditFacultyForm {
+  firstName: string;
+  middleName: string;
+  lastName: string;
+  birthDate: string;
+  age: number;
+  sex: string;
+  email: string;
+  contactNumber: string;
+  address: string;
+  position: string;
+  yearsOfTeaching: number;
+  expertise: string;
+}
+
+interface PaginationMeta {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+
 function getStringValue(...values: unknown[]) {
   for (const value of values) {
     if (typeof value === "string") return value;
@@ -55,14 +77,28 @@ function getIsoDateYearsAgo(years: number) {
 }
 
 export function FacultyProfile() {
+  const PAGE_SIZE = 10;
   const [faculty, setFaculty] = useState<Faculty[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [expertiseFilter, setExpertiseFilter] = useState("");
   const [minimumExperienceFilter, setMinimumExperienceFilter] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState<PaginationMeta>({
+    page: 1,
+    limit: PAGE_SIZE,
+    total: 0,
+    totalPages: 1,
+  });
   const [selectedFaculty, setSelectedFaculty] = useState<Faculty | null>(null);
   const [showModal, setShowModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showEditSuccessModal, setShowEditSuccessModal] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [submitError, setSubmitError] = useState('');
+  const [editSubmitError, setEditSubmitError] = useState('');
+  const [editingFaculty, setEditingFaculty] = useState<Faculty | null>(null);
+  const [facultyToDelete, setFacultyToDelete] = useState<Faculty | null>(null);
   const [expertiseInputs, setExpertiseInputs] = useState<ExpertiseCertificateInput[]>([
     { id: 1, expertise: '', file: null },
   ]);
@@ -79,11 +115,53 @@ export function FacultyProfile() {
     position: "Instructor",
     yearsOfTeaching: 0,
   });
+  const [editFormData, setEditFormData] = useState<EditFacultyForm>({
+    firstName: "",
+    middleName: "",
+    lastName: "",
+    birthDate: "",
+    age: 0,
+    sex: "Male",
+    email: "",
+    contactNumber: "",
+    address: "",
+    position: "Instructor",
+    yearsOfTeaching: 0,
+    expertise: "",
+  });
 
   const fetchFaculty = async () => {
     try {
-      const data = await api.get<any[]>('/faculty');
-      setFaculty(data.map(f => {
+      const params = new URLSearchParams({
+        page: String(currentPage),
+        limit: String(PAGE_SIZE),
+      });
+      if (searchQuery.trim()) params.set('search', searchQuery.trim());
+      if (expertiseFilter.trim()) params.set('expertise', expertiseFilter.trim());
+      if (minimumExperienceFilter.trim()) params.set('minExperience', minimumExperienceFilter.trim());
+
+      const response = await api.get<any[] | { data: any[]; pagination?: PaginationMeta }>(`/faculty?${params.toString()}`);
+      const isLegacyResponse = Array.isArray(response);
+      const allRows = isLegacyResponse ? response : (response.data || []);
+      const legacyOffset = (currentPage - 1) * PAGE_SIZE;
+      const rows = isLegacyResponse
+        ? allRows.slice(legacyOffset, legacyOffset + PAGE_SIZE)
+        : allRows;
+      const meta = isLegacyResponse
+        ? {
+          page: currentPage,
+          limit: PAGE_SIZE,
+          total: allRows.length,
+          totalPages: Math.max(1, Math.ceil(allRows.length / PAGE_SIZE)),
+        }
+        : (response.pagination || {
+          page: currentPage,
+          limit: PAGE_SIZE,
+          total: allRows.length,
+          totalPages: 1,
+        });
+
+      setFaculty(rows.map(f => {
         const firstName = getStringValue(f.first_name, f.firstName).trim();
         const middleName = getStringValue(f.middle_name, f.middleName).trim();
         const lastName = getStringValue(f.last_name, f.lastName).trim();
@@ -142,37 +220,45 @@ export function FacultyProfile() {
           birthDate: birthDateValue ? String(birthDateValue).split('T')[0] : '',
         };
       }));
+      setPagination({
+        page: meta.page,
+        limit: meta.limit,
+        total: meta.total,
+        totalPages: Math.max(1, meta.totalPages),
+      });
     } catch (err) {
       console.error('Failed to fetch faculty:', err);
     }
   };
 
-  useEffect(() => { fetchFaculty(); }, []);
-
-  const filteredFaculty = faculty.filter((member) => {
-    const normalizedSearch = searchQuery.toLowerCase().trim();
-    const normalizedExpertise = expertiseFilter.toLowerCase().trim();
-    const minimumExperience = Number(minimumExperienceFilter);
-    const hasMinimumExperienceFilter =
-      minimumExperienceFilter.trim() !== '' && Number.isFinite(minimumExperience);
-
-    const matchesSearch =
-      !normalizedSearch ||
-      member.name.toLowerCase().includes(normalizedSearch) ||
-      member.email.toLowerCase().includes(normalizedSearch);
-
-    const matchesExpertise =
-      !normalizedExpertise || member.expertise.toLowerCase().includes(normalizedExpertise);
-
-    const matchesExperience =
-      !hasMinimumExperienceFilter || member.yearsOfTeaching >= minimumExperience;
-
-    return matchesSearch && matchesExpertise && matchesExperience;
-  });
+  useEffect(() => {
+    fetchFaculty();
+  }, [currentPage, searchQuery, expertiseFilter, minimumExperienceFilter]);
 
   const handleViewFaculty = (member: Faculty) => {
     setSelectedFaculty(member);
     setShowModal(true);
+  };
+
+  const handleEditFaculty = (member: Faculty) => {
+    setEditSubmitError('');
+    setShowEditSuccessModal(false);
+    setEditingFaculty(member);
+    setEditFormData({
+      firstName: member.firstName,
+      middleName: member.middleName,
+      lastName: member.lastName,
+      birthDate: member.birthDate,
+      age: member.age,
+      sex: member.sex || 'Male',
+      email: member.email,
+      contactNumber: member.contactNumber,
+      address: member.address,
+      position: member.position || 'Instructor',
+      yearsOfTeaching: member.yearsOfTeaching,
+      expertise: member.expertise,
+    });
+    setShowEditModal(true);
   };
 
   const handleAddFaculty = async () => {
@@ -272,19 +358,82 @@ export function FacultyProfile() {
     }
   };
 
-  const handleDeleteFaculty = async (id: string) => {
-    if (confirm("Are you sure you want to delete this faculty member?")) {
-      try {
-        await api.delete(`/faculty/${id}`);
-        await fetchFaculty();
-      } catch (err) {
-        console.error('Failed to delete faculty:', err);
+  const handleRequestDeleteFaculty = (member: Faculty) => {
+    setFacultyToDelete(member);
+    setShowDeleteModal(true);
+  };
+
+  const handleConfirmDeleteFaculty = async () => {
+    if (!facultyToDelete) return;
+    try {
+      await api.delete(`/faculty/${facultyToDelete.id}`);
+      await fetchFaculty();
+      if (selectedFaculty?.id === facultyToDelete.id) {
+        setShowModal(false);
+        setSelectedFaculty(null);
       }
+      setShowDeleteModal(false);
+      setFacultyToDelete(null);
+    } catch (err) {
+      console.error('Failed to delete faculty:', err);
     }
   };
 
   const handleInputChange = (field: keyof AddFacultyForm, value: string | number) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleEditInputChange = (field: keyof EditFacultyForm, value: string | number) => {
+    setEditFormData((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleUpdateFaculty = async () => {
+    if (!editingFaculty) return;
+    setEditSubmitError('');
+
+    const requiredChecks: Array<{ key: string; value: string }> = [
+      { key: 'First Name', value: editFormData.firstName },
+      { key: 'Last Name', value: editFormData.lastName },
+      { key: 'Birth Date', value: editFormData.birthDate },
+      { key: 'Sex', value: editFormData.sex },
+      { key: 'Email', value: editFormData.email },
+      { key: 'Contact Number', value: editFormData.contactNumber },
+      { key: 'Address', value: editFormData.address },
+      { key: 'Position', value: editFormData.position },
+    ];
+    const missing = requiredChecks.filter((item) => !item.value || !item.value.trim()).map((item) => item.key);
+    if (missing.length > 0) {
+      setEditSubmitError(`Please complete required fields: ${missing.join(', ')}`);
+      return;
+    }
+
+    try {
+      await api.put(`/faculty/${editingFaculty.id}`, {
+        first_name: editFormData.firstName.trim(),
+        middle_name: editFormData.middleName.trim() || null,
+        last_name: editFormData.lastName.trim(),
+        birth_date: editFormData.birthDate,
+        age: editFormData.age,
+        gender: editFormData.sex.trim(),
+        email: editFormData.email.trim().toLowerCase(),
+        contact_no: editFormData.contactNumber.trim(),
+        address: editFormData.address.trim(),
+        specialization: editFormData.expertise.trim() || null,
+      });
+
+      await api.put(`/faculty/${editingFaculty.id}/employment`, {
+        rank: editFormData.position.trim(),
+        date_hired: getIsoDateYearsAgo(editFormData.yearsOfTeaching),
+      });
+
+      await fetchFaculty();
+      setShowEditModal(false);
+      setEditingFaculty(null);
+      setShowEditSuccessModal(true);
+    } catch (err) {
+      console.error('Failed to update faculty:', err);
+      setEditSubmitError(err instanceof Error ? err.message : 'Failed to update faculty');
+    }
   };
 
   const addExpertiseInput = () => {
@@ -325,7 +474,10 @@ export function FacultyProfile() {
                   type="text"
                   placeholder="Search by name or email..."
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onChange={(e) => {
+                    setCurrentPage(1);
+                    setSearchQuery(e.target.value);
+                  }}
                   className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
                 />
               </div>
@@ -333,7 +485,10 @@ export function FacultyProfile() {
                 type="text"
                 placeholder="Filter expertise (e.g., Programming)"
                 value={expertiseFilter}
-                onChange={(e) => setExpertiseFilter(e.target.value)}
+                onChange={(e) => {
+                  setCurrentPage(1);
+                  setExpertiseFilter(e.target.value);
+                }}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
               />
               <input
@@ -341,7 +496,10 @@ export function FacultyProfile() {
                 min="0"
                 placeholder="Min years of experience"
                 value={minimumExperienceFilter}
-                onChange={(e) => setMinimumExperienceFilter(e.target.value)}
+                onChange={(e) => {
+                  setCurrentPage(1);
+                  setMinimumExperienceFilter(e.target.value);
+                }}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
               />
             </div>
@@ -357,7 +515,7 @@ export function FacultyProfile() {
 
         {/* Faculty Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredFaculty.map((member) => (
+          {faculty.map((member) => (
             <div
               key={member.id}
               className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow"
@@ -375,11 +533,14 @@ export function FacultyProfile() {
                   >
                     <Eye className="w-4 h-4" />
                   </button>
-                  <button className="p-1 text-green-600 hover:bg-green-50 rounded">
+                  <button
+                    onClick={() => handleEditFaculty(member)}
+                    className="p-1 text-green-600 hover:bg-green-50 rounded"
+                  >
                     <Edit className="w-4 h-4" />
                   </button>
                   <button 
-                    onClick={() => handleDeleteFaculty(member.id)}
+                    onClick={() => handleRequestDeleteFaculty(member)}
                     className="p-1 text-red-600 hover:bg-red-50 rounded"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -413,6 +574,30 @@ export function FacultyProfile() {
               </div>
             </div>
           ))}
+        </div>
+
+        <div className="mt-6 flex flex-col gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-gray-600">
+            Showing page {pagination.page} of {pagination.totalPages} ({pagination.total} faculty members)
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setCurrentPage((previous) => Math.max(1, previous - 1))}
+              disabled={pagination.page <= 1}
+              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              onClick={() => setCurrentPage((previous) => Math.min(pagination.totalPages, previous + 1))}
+              disabled={pagination.page >= pagination.totalPages}
+              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
         </div>
       </div>
 
@@ -481,6 +666,224 @@ export function FacultyProfile() {
                 <label className="text-sm font-semibold text-gray-600">Expertise Certificate Path</label>
                 <p className="text-gray-900 mt-1 break-all">{selectedFaculty.expertiseCertificatePath || '-'}</p>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Faculty Modal */}
+      {showEditModal && editingFaculty && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black bg-opacity-50 p-4 py-6">
+          <div className="bg-white rounded-lg max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-gray-900">Edit Faculty</h2>
+              <button
+                onClick={() => setShowEditModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            {editSubmitError && (
+              <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {editSubmitError}
+              </div>
+            )}
+            <form onSubmit={(e) => { e.preventDefault(); handleUpdateFaculty(); }} className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">First Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={editFormData.firstName}
+                  onChange={(e) => handleEditInputChange("firstName", e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Middle Name</label>
+                <input
+                  type="text"
+                  value={editFormData.middleName}
+                  onChange={(e) => handleEditInputChange("middleName", e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Last Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={editFormData.lastName}
+                  onChange={(e) => handleEditInputChange("lastName", e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Birth Date *</label>
+                <input
+                  type="date"
+                  required
+                  value={editFormData.birthDate}
+                  onChange={(e) => handleEditInputChange("birthDate", e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Age *</label>
+                <input
+                  type="number"
+                  required
+                  min="20"
+                  max="100"
+                  value={editFormData.age || ""}
+                  onChange={(e) => handleEditInputChange("age", parseInt(e.target.value || '0', 10))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Sex *</label>
+                <select
+                  required
+                  value={editFormData.sex}
+                  onChange={(e) => handleEditInputChange("sex", e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                >
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                </select>
+              </div>
+              <div className="col-span-2">
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Email *</label>
+                <input
+                  type="email"
+                  required
+                  value={editFormData.email}
+                  onChange={(e) => handleEditInputChange("email", e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Contact Number *</label>
+                <input
+                  type="text"
+                  required
+                  value={editFormData.contactNumber}
+                  onChange={(e) => handleEditInputChange("contactNumber", e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Position *</label>
+                <select
+                  required
+                  value={editFormData.position}
+                  onChange={(e) => handleEditInputChange("position", e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                >
+                  <option value="Instructor">Instructor</option>
+                  <option value="Assistant Professor">Assistant Professor</option>
+                  <option value="Associate Professor">Associate Professor</option>
+                  <option value="Professor">Professor</option>
+                </select>
+              </div>
+              <div className="col-span-2">
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Address *</label>
+                <textarea
+                  required
+                  value={editFormData.address}
+                  onChange={(e) => handleEditInputChange("address", e.target.value)}
+                  rows={2}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Years of Teaching *</label>
+                <input
+                  type="number"
+                  required
+                  min="0"
+                  max="50"
+                  value={editFormData.yearsOfTeaching || ""}
+                  onChange={(e) => handleEditInputChange("yearsOfTeaching", parseInt(e.target.value || '0', 10))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Expertise</label>
+                <input
+                  type="text"
+                  value={editFormData.expertise}
+                  onChange={(e) => handleEditInputChange("expertise", e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  placeholder="e.g., Network Security"
+                />
+              </div>
+              <div className="col-span-2 flex gap-3 mt-4">
+                <button
+                  type="submit"
+                  className="flex-1 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors"
+                >
+                  Save Changes
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowEditModal(false)}
+                  className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && facultyToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div className="w-full max-w-md rounded-lg bg-white p-6">
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Delete Faculty</h2>
+            <p className="text-sm text-gray-600">
+              Are you sure you want to delete <span className="font-semibold text-gray-900">{facultyToDelete.name}</span>? This action cannot be undone.
+            </p>
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                onClick={handleConfirmDeleteFaculty}
+                className="flex-1 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+              >
+                Confirm Delete
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  setFacultyToDelete(null);
+                }}
+                className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Success Modal */}
+      {showEditSuccessModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div className="w-full max-w-md rounded-lg bg-white p-6">
+            <h2 className="text-xl font-bold text-gray-900">Edit Successful</h2>
+            <p className="mt-2 text-sm text-gray-600">Faculty profile changes were saved successfully.</p>
+            <div className="mt-6 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowEditSuccessModal(false)}
+                className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors"
+              >
+                OK
+              </button>
             </div>
           </div>
         </div>

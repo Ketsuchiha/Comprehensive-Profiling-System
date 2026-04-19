@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { FileText, Download, Upload, Plus, Search, X } from "lucide-react";
+import { FileText, Download, Upload, Plus, Search, X, Trash2 } from "lucide-react";
 import { api } from "../utils/api";
 
 interface Instrument {
@@ -11,6 +11,13 @@ interface Instrument {
   uploadDate: string;
   fileSize: string;
   fileUrl: string;
+}
+
+interface PaginationMeta {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
 }
 
 const typeColors = {
@@ -26,13 +33,24 @@ const typeIcons = {
 };
 
 export function Instruments() {
+  const PAGE_SIZE = 10;
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const [subjects, setSubjects] = useState<Array<{ subject_code: string; subject_name: string }>>([]);
   const [facultyOptions, setFacultyOptions] = useState<Array<{ faculty_id: string; first_name: string; last_name: string; specialization?: string }>>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedType, setSelectedType] = useState<string>("all");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState<PaginationMeta>({
+    page: 1,
+    limit: PAGE_SIZE,
+    total: 0,
+    totalPages: 1,
+  });
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [pendingDeleteItem, setPendingDeleteItem] = useState<Instrument | null>(null);
   const [submitError, setSubmitError] = useState('');
+  const [deleteError, setDeleteError] = useState('');
   const [selectedFileName, setSelectedFileName] = useState('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -45,6 +63,29 @@ export function Instruments() {
     fileSize: "",
   });
 
+  const toInstrumentFromCombinedRow = (row: any, resolveFileUrl: (value: string | null | undefined) => string): Instrument => ({
+    id: String(row.item_id || row.id),
+    title: row.title || '',
+    type: (row.item_type || row.type || 'lesson') as Instrument['type'],
+    courseCode: row.subject_code || row.course_code || '',
+    instructor: `${row.faculty_first_name || ''} ${row.faculty_last_name || ''}`.trim(),
+    uploadDate: row.created_at ? String(row.created_at).split('T')[0] : '',
+    fileSize: 'N/A',
+    fileUrl: resolveFileUrl(row.file_url || row.fileUrl),
+  });
+
+  const applyClientPagination = (rows: Instrument[]) => {
+    const offset = (currentPage - 1) * PAGE_SIZE;
+    const pagedRows = rows.slice(offset, offset + PAGE_SIZE);
+    setInstruments(pagedRows);
+    setPagination({
+      page: currentPage,
+      limit: PAGE_SIZE,
+      total: rows.length,
+      totalPages: Math.max(1, Math.ceil(rows.length / PAGE_SIZE)),
+    });
+  };
+
   const fetchInstruments = async () => {
     try {
       const backendBaseUrl = `${window.location.protocol}//${window.location.hostname}:5000`;
@@ -55,37 +96,103 @@ export function Instruments() {
         return '';
       };
 
-      const [syllabi, lessons] = await Promise.all([
-        api.get<any[]>('/instruments/syllabus').catch((err) => { console.error('Failed to fetch syllabi:', err); return []; }),
-        api.get<any[]>('/instruments/lessons').catch((err) => { console.error('Failed to fetch lessons:', err); return []; }),
-      ]);
-      const syllabusItems: Instrument[] = (syllabi || []).map(s => ({
-        id: String(s.syllabus_id || s.id),
-        title: `${s.subject_name || s.subject_code || ''} Syllabus`,
-        type: 'syllabus' as const,
-        courseCode: s.subject_code || '',
-        instructor: `${s.faculty_first_name || ''} ${s.faculty_last_name || ''}`.trim(),
-        uploadDate: s.created_at ? s.created_at.split('T')[0] : '',
-        fileSize: 'N/A',
-        fileUrl: resolveFileUrl(s.references_biblio),
-      }));
-      const lessonItems: Instrument[] = (lessons || []).map(l => ({
-        id: String(l.lesson_id || l.id),
-        title: l.title || '',
-        type: 'lesson' as const,
-        courseCode: l.subject_code || '',
-        instructor: `${l.faculty_first_name || ''} ${l.faculty_last_name || ''}`.trim(),
-        uploadDate: l.created_at ? l.created_at.split('T')[0] : '',
-        fileSize: 'N/A',
-        fileUrl: resolveFileUrl(l.file_path || l.external_url),
-      }));
-      setInstruments([...syllabusItems, ...lessonItems]);
+      const params = new URLSearchParams({
+        page: String(currentPage),
+        limit: String(PAGE_SIZE),
+      });
+      if (searchQuery.trim()) params.set('search', searchQuery.trim());
+      if (selectedType !== 'all') params.set('type', selectedType);
+
+      let response: any;
+      try {
+        response = await api.get<any[] | { data: any[]; pagination?: PaginationMeta }>(`/instruments?${params.toString()}`);
+      } catch (primaryError) {
+        // Backward compatibility for servers that only expose /instruments/syllabus and /instruments/lessons.
+        const [syllabiRows, lessonRows] = await Promise.all([
+          api.get<any[]>('/instruments/syllabus').catch(() => []),
+          api.get<any[]>('/instruments/lessons').catch(() => []),
+        ]);
+
+        const combined = [
+          ...syllabiRows.map((row) => ({
+            item_id: row.syllabus_id,
+            item_type: 'syllabus',
+            title: `${row.subject_name || row.subject_code || 'Untitled'} Syllabus`,
+            subject_code: row.subject_code,
+            faculty_first_name: row.faculty_first_name,
+            faculty_last_name: row.faculty_last_name,
+            created_at: row.created_at,
+            file_url: row.references_biblio,
+          })),
+          ...lessonRows.map((row) => ({
+            item_id: row.lesson_id,
+            item_type: 'lesson',
+            title: row.title || `Lesson ${row.lesson_id}`,
+            subject_code: row.subject_code,
+            faculty_first_name: row.faculty_first_name,
+            faculty_last_name: row.faculty_last_name,
+            created_at: row.created_at,
+            file_url: row.file_path || row.external_url,
+          })),
+        ];
+
+        const filtered = combined.filter((row) => {
+          if (selectedType !== 'all' && row.item_type !== selectedType) return false;
+          if (!searchQuery.trim()) return true;
+
+          const query = searchQuery.trim().toLowerCase();
+          const title = String(row.title || '').toLowerCase();
+          const subjectCode = String(row.subject_code || '').toLowerCase();
+          const instructor = `${row.faculty_first_name || ''} ${row.faculty_last_name || ''}`.toLowerCase();
+          return title.includes(query) || subjectCode.includes(query) || instructor.includes(query);
+        });
+
+        filtered.sort((a, b) => {
+          const left = new Date(a.created_at || 0).getTime();
+          const right = new Date(b.created_at || 0).getTime();
+          return right - left;
+        });
+
+        const mapped = filtered.map((row) => toInstrumentFromCombinedRow(row, resolveFileUrl));
+        applyClientPagination(mapped);
+        return;
+      }
+
+      const isLegacyResponse = Array.isArray(response);
+      const allRows = isLegacyResponse ? response : (response.data || []);
+      const legacyOffset = (currentPage - 1) * PAGE_SIZE;
+      const rows = isLegacyResponse
+        ? allRows.slice(legacyOffset, legacyOffset + PAGE_SIZE)
+        : allRows;
+      const meta = isLegacyResponse
+        ? {
+          page: currentPage,
+          limit: PAGE_SIZE,
+          total: allRows.length,
+          totalPages: Math.max(1, Math.ceil(allRows.length / PAGE_SIZE)),
+        }
+        : (response.pagination || {
+          page: currentPage,
+          limit: PAGE_SIZE,
+          total: allRows.length,
+          totalPages: 1,
+        });
+
+      setInstruments(rows.map((row) => toInstrumentFromCombinedRow(row, resolveFileUrl)));
+      setPagination({
+        page: meta.page,
+        limit: meta.limit,
+        total: meta.total,
+        totalPages: Math.max(1, meta.totalPages),
+      });
     } catch (err) {
       console.error('Failed to fetch instruments:', err);
     }
   };
 
-  useEffect(() => { fetchInstruments(); }, []);
+  useEffect(() => {
+    fetchInstruments();
+  }, [currentPage, searchQuery, selectedType]);
 
   useEffect(() => {
     api.get<Array<{ subject_code: string; subject_name: string }>>('/subjects')
@@ -96,13 +203,6 @@ export function Instruments() {
       .then(setFacultyOptions)
       .catch((err) => console.error('Failed to fetch faculty:', err));
   }, []);
-
-  const filteredInstruments = instruments.filter((item) => {
-    const matchesSearch = item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.courseCode.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesType = selectedType === "all" || item.type === selectedType;
-    return matchesSearch && matchesType;
-  });
 
   const handleAddInstrument = async () => {
     setSubmitError('');
@@ -225,6 +325,42 @@ export function Instruments() {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
+  const openDeleteModal = (item: Instrument) => {
+    setDeleteError('');
+    setPendingDeleteItem(item);
+    setShowDeleteModal(true);
+  };
+
+  const closeDeleteModal = () => {
+    setDeleteError('');
+    setPendingDeleteItem(null);
+    setShowDeleteModal(false);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!pendingDeleteItem) return;
+
+    const endpoint = pendingDeleteItem.type === 'syllabus'
+      ? `/instruments/syllabus/${encodeURIComponent(pendingDeleteItem.id)}`
+      : pendingDeleteItem.type === 'lesson'
+        ? `/instruments/lessons/${encodeURIComponent(pendingDeleteItem.id)}`
+        : null;
+
+    if (!endpoint) {
+      setDeleteError('Delete is currently supported for syllabus and lesson documents only.');
+      return;
+    }
+
+    try {
+      await api.delete(endpoint);
+      await fetchInstruments();
+      closeDeleteModal();
+    } catch (err) {
+      console.error('Failed to delete instrument:', err);
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete instrument');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 p-8">
       <div className="max-w-7xl mx-auto">
@@ -235,7 +371,44 @@ export function Instruments() {
             Manage syllabi, lesson plans, and conclusion reports
           </p>
         </div>
-
+                {/* Statistics */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-8">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-600 mb-1">Syllabi on Page</p>
+                <p className="text-3xl font-bold text-blue-600">
+                  {instruments.filter(i => i.type === "syllabus").length}
+                </p>
+              </div>
+              <div className="text-4xl">📋</div>
+            </div>
+          </div>
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-600 mb-1">Lessons on Page</p>
+                <p className="text-3xl font-bold text-purple-600">
+                  {instruments.filter(i => i.type === "lesson").length}
+                </p>
+              </div>
+              <div className="text-4xl">📖</div>
+            </div>
+          </div>
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-600 mb-1">Conclusions on Page</p>
+                <p className="text-3xl font-bold text-green-600">
+                  {instruments.filter(i => i.type === "conclusion").length}
+                </p>
+              </div>
+              <div className="text-4xl">📊</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <br></br>
         {/* Actions Bar */}
         <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-200 mb-6">
           <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
@@ -245,13 +418,19 @@ export function Instruments() {
                 type="text"
                 placeholder="Search by title or course code..."
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  setCurrentPage(1);
+                  setSearchQuery(e.target.value);
+                }}
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
               />
             </div>
             <div className="flex gap-2">
               <button
-                onClick={() => setSelectedType("all")}
+                onClick={() => {
+                  setCurrentPage(1);
+                  setSelectedType("all");
+                }}
                 className={`px-4 py-2 rounded-lg transition-colors ${
                   selectedType === "all"
                     ? "bg-orange-500 text-white"
@@ -261,7 +440,10 @@ export function Instruments() {
                 All
               </button>
               <button
-                onClick={() => setSelectedType("syllabus")}
+                onClick={() => {
+                  setCurrentPage(1);
+                  setSelectedType("syllabus");
+                }}
                 className={`px-4 py-2 rounded-lg transition-colors ${
                   selectedType === "syllabus"
                     ? "bg-orange-500 text-white"
@@ -271,7 +453,10 @@ export function Instruments() {
                 Syllabus
               </button>
               <button
-                onClick={() => setSelectedType("lesson")}
+                onClick={() => {
+                  setCurrentPage(1);
+                  setSelectedType("lesson");
+                }}
                 className={`px-4 py-2 rounded-lg transition-colors ${
                   selectedType === "lesson"
                     ? "bg-orange-500 text-white"
@@ -281,7 +466,10 @@ export function Instruments() {
                 Lesson
               </button>
               <button
-                onClick={() => setSelectedType("conclusion")}
+                onClick={() => {
+                  setCurrentPage(1);
+                  setSelectedType("conclusion");
+                }}
                 className={`px-4 py-2 rounded-lg transition-colors ${
                   selectedType === "conclusion"
                     ? "bg-orange-500 text-white"
@@ -304,7 +492,7 @@ export function Instruments() {
         {/* Instruments List */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
           <div className="divide-y divide-gray-200">
-            {filteredInstruments.map((item) => (
+            {instruments.map((item) => (
               <div
                 key={item.id}
                 className="p-6 hover:bg-gray-50 transition-colors"
@@ -362,6 +550,15 @@ export function Instruments() {
                   </div>
                   <div className="flex gap-2">
                     <button
+                      type="button"
+                      onClick={() => openDeleteModal(item)}
+                      disabled={item.type === 'conclusion'}
+                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:text-gray-300 disabled:hover:bg-transparent disabled:cursor-not-allowed"
+                      title={item.type === 'conclusion' ? 'Delete is not supported for conclusion documents' : 'Delete document'}
+                    >
+                      <Trash2 className="w-5 h-5" />
+                    </button>
+                    <button
                       onClick={() => handleViewDocument(item.fileUrl)}
                       className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                       title="View uploaded file"
@@ -381,45 +578,30 @@ export function Instruments() {
               </div>
             ))}
           </div>
-        </div>
-
-        {/* Statistics */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-8">
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 mb-1">Total Syllabi</p>
-                <p className="text-3xl font-bold text-blue-600">
-                  {instruments.filter(i => i.type === "syllabus").length}
-                </p>
-              </div>
-              <div className="text-4xl">📋</div>
-            </div>
-          </div>
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 mb-1">Total Lessons</p>
-                <p className="text-3xl font-bold text-purple-600">
-                  {instruments.filter(i => i.type === "lesson").length}
-                </p>
-              </div>
-              <div className="text-4xl">📖</div>
-            </div>
-          </div>
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 mb-1">Total Conclusions</p>
-                <p className="text-3xl font-bold text-green-600">
-                  {instruments.filter(i => i.type === "conclusion").length}
-                </p>
-              </div>
-              <div className="text-4xl">📊</div>
+          <div className="flex flex-col gap-3 border-t border-gray-200 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-gray-600">
+              Showing page {pagination.page} of {pagination.totalPages} ({pagination.total} instruments)
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCurrentPage((previous) => Math.max(1, previous - 1))}
+                disabled={pagination.page <= 1}
+                className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                onClick={() => setCurrentPage((previous) => Math.min(pagination.totalPages, previous + 1))}
+                disabled={pagination.page >= pagination.totalPages}
+                className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Next
+              </button>
             </div>
           </div>
         </div>
-      </div>
 
       {/* Add Instrument Modal */}
       {showAddModal && (
@@ -549,6 +731,39 @@ export function Instruments() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && pendingDeleteItem && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg max-w-md w-full p-6">
+            <h2 className="text-xl font-bold text-gray-900">Delete Document</h2>
+            <p className="mt-2 text-sm text-gray-600">
+              Are you sure you want to delete <span className="font-semibold text-gray-900">{pendingDeleteItem.title}</span>? This action cannot be undone.
+            </p>
+            {deleteError && (
+              <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {deleteError}
+              </div>
+            )}
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                className="flex-1 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+              >
+                Delete
+              </button>
+              <button
+                type="button"
+                onClick={closeDeleteModal}
+                className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}

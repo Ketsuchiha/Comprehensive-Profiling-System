@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Clock, Plus, Filter, X } from "lucide-react";
+import { useState, useEffect, useMemo } from "react";
+import { Clock, Plus, Filter, X, ChevronLeft, ChevronRight, CalendarDays } from "lucide-react";
 import { api } from "../utils/api";
 
 interface Schedule {
@@ -27,16 +27,52 @@ interface RoomOption {
   building?: string;
 }
 
+interface PaginationMeta {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+
 const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const weekDays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+function parseScheduleDays(value: string) {
+  return value
+    .split(',')
+    .map((day) => day.trim())
+    .filter(Boolean);
+}
+
+function isSameDate(left: Date, right: Date) {
+  return left.getFullYear() === right.getFullYear()
+    && left.getMonth() === right.getMonth()
+    && left.getDate() === right.getDate();
+}
 
 export function Scheduling() {
+  const PAGE_SIZE = 10;
   const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [calendarSchedules, setCalendarSchedules] = useState<Schedule[]>([]);
   const [subjects, setSubjects] = useState<Array<{ subject_code: string; subject_name: string }>>([]);
   const [facultyOptions, setFacultyOptions] = useState<FacultyOption[]>([]);
   const [roomOptions, setRoomOptions] = useState<RoomOption[]>([]);
   const [selectedDay, setSelectedDay] = useState<string>("all");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState<PaginationMeta>({
+    page: 1,
+    limit: PAGE_SIZE,
+    total: 0,
+    totalPages: 1,
+  });
   const [showAddModal, setShowAddModal] = useState(false);
   const [submitError, setSubmitError] = useState('');
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const today = new Date();
+    return new Date(today.getFullYear(), today.getMonth(), 1);
+  });
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState<Date>(() => new Date());
+  const [showDaySchedulesModal, setShowDaySchedulesModal] = useState(false);
   const [formData, setFormData] = useState<Omit<Schedule, "id">>({
     courseCode: "",
     courseName: "",
@@ -50,8 +86,36 @@ export function Scheduling() {
 
   const fetchSchedules = async () => {
     try {
-      const data = await api.get<any[]>('/schedules');
-      setSchedules(data.map(s => ({
+      const params = new URLSearchParams({
+        page: String(currentPage),
+        limit: String(PAGE_SIZE),
+      });
+      if (selectedDay !== 'all') {
+        params.set('day', selectedDay);
+      }
+
+      const response = await api.get<any[] | { data: any[]; pagination?: PaginationMeta }>(`/schedules?${params.toString()}`);
+      const isLegacyResponse = Array.isArray(response);
+      const allRows = isLegacyResponse ? response : (response.data || []);
+      const legacyOffset = (currentPage - 1) * PAGE_SIZE;
+      const rows = isLegacyResponse
+        ? allRows.slice(legacyOffset, legacyOffset + PAGE_SIZE)
+        : allRows;
+      const meta = isLegacyResponse
+        ? {
+          page: currentPage,
+          limit: PAGE_SIZE,
+          total: allRows.length,
+          totalPages: Math.max(1, Math.ceil(allRows.length / PAGE_SIZE)),
+        }
+        : (response.pagination || {
+          page: currentPage,
+          limit: PAGE_SIZE,
+          total: allRows.length,
+          totalPages: 1,
+        });
+
+      setSchedules(rows.map(s => ({
         id: String(s.schedule_id),
         courseCode: s.subject_code || '',
         courseName: s.subject_name || '',
@@ -62,6 +126,12 @@ export function Scheduling() {
         timeEnd: s.end_time || '',
         section: s.section || '',
       })));
+      setPagination({
+        page: meta.page,
+        limit: meta.limit,
+        total: meta.total,
+        totalPages: Math.max(1, meta.totalPages),
+      });
     } catch (err) {
       console.error('Failed to fetch schedules:', err);
     }
@@ -96,6 +166,33 @@ export function Scheduling() {
 
   const normalizeText = (value: string) => value.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
 
+  const fetchCalendarSchedules = async () => {
+    try {
+      const data = await api.get<any[]>('/schedules/calendar');
+      setCalendarSchedules(data.map((s) => ({
+        id: String(s.schedule_id),
+        courseCode: s.subject_code || '',
+        courseName: s.subject_name || '',
+        instructor: `${s.faculty_first_name || ''} ${s.faculty_last_name || ''}`.trim(),
+        room: s.room_name || '',
+        day: s.day_of_week || '',
+        timeStart: s.start_time || '',
+        timeEnd: s.end_time || '',
+        section: s.section || '',
+      })));
+    } catch (err) {
+      console.error('Failed to fetch calendar schedules:', err);
+    }
+  };
+
+  const timeToMinutes = (value: string) => {
+    if (!value) return Number.MAX_SAFE_INTEGER;
+    const [hours, minutes] = value.split(':');
+    const parsedHours = Number.parseInt(hours || '0', 10);
+    const parsedMinutes = Number.parseInt(minutes || '0', 10);
+    return (parsedHours * 60) + parsedMinutes;
+  };
+
   const scoreFacultyForSubject = (subjectName: string, specialization?: string) => {
     if (!specialization) return 0;
 
@@ -122,15 +219,49 @@ export function Scheduling() {
   };
 
   useEffect(() => {
-    fetchSchedules();
     fetchSubjects();
     fetchFaculty();
     fetchRooms();
+    fetchCalendarSchedules();
   }, []);
 
-  const filteredSchedules = selectedDay === "all"
-    ? schedules
-    : schedules.filter((schedule) => schedule.day === selectedDay);
+  useEffect(() => {
+    fetchSchedules();
+  }, [currentPage, selectedDay]);
+
+  const calendarDays = useMemo(() => {
+    const year = calendarMonth.getFullYear();
+    const month = calendarMonth.getMonth();
+    const firstOfMonth = new Date(year, month, 1);
+    const lastOfMonth = new Date(year, month + 1, 0);
+
+    const gridStart = new Date(firstOfMonth);
+    gridStart.setDate(firstOfMonth.getDate() - firstOfMonth.getDay());
+
+    const gridEnd = new Date(lastOfMonth);
+    gridEnd.setDate(lastOfMonth.getDate() + (6 - lastOfMonth.getDay()));
+
+    const daysInGrid: Date[] = [];
+    const cursor = new Date(gridStart);
+
+    while (cursor <= gridEnd) {
+      daysInGrid.push(new Date(cursor));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    return daysInGrid;
+  }, [calendarMonth]);
+
+  const getSchedulesForDate = (date: Date) => {
+    const dayName = weekDays[date.getDay()];
+    return calendarSchedules.filter((schedule) => parseScheduleDays(schedule.day).includes(dayName));
+  };
+
+  const selectedDateSchedules = useMemo(() => {
+    return getSchedulesForDate(selectedCalendarDate)
+      .slice()
+      .sort((left, right) => timeToMinutes(left.timeStart) - timeToMinutes(right.timeStart));
+  }, [selectedCalendarDate, calendarSchedules]);
 
   const handleAddSchedule = async () => {
     setSubmitError('');
@@ -145,6 +276,7 @@ export function Scheduling() {
         end_time: formData.timeEnd,
       });
       await fetchSchedules();
+      await fetchCalendarSchedules();
       setShowAddModal(false);
       setFormData({
         courseCode: "",
@@ -194,7 +326,10 @@ export function Scheduling() {
               <Filter className="w-5 h-5 text-gray-500" />
               <select
                 value={selectedDay}
-                onChange={(e) => setSelectedDay(e.target.value)}
+                onChange={(e) => {
+                  setCurrentPage(1);
+                  setSelectedDay(e.target.value);
+                }}
                 className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
               >
                 <option value="all">All Days</option>
@@ -217,7 +352,7 @@ export function Scheduling() {
 
         {/* Schedule Cards */}
         <div className="space-y-4">
-          {filteredSchedules.map((schedule) => (
+          {schedules.map((schedule) => (
             <div
               key={schedule.id}
               className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow"
@@ -270,38 +405,184 @@ export function Scheduling() {
           ))}
         </div>
 
-        {/* Weekly View */}
+        <div className="mt-6 flex flex-col gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-gray-600">
+            Showing page {pagination.page} of {pagination.totalPages} ({pagination.total} schedules)
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setCurrentPage((previous) => Math.max(1, previous - 1))}
+              disabled={pagination.page <= 1}
+              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              onClick={() => setCurrentPage((previous) => Math.min(pagination.totalPages, previous + 1))}
+              disabled={pagination.page >= pagination.totalPages}
+              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+
+        {/* Monthly View */}
         <div className="mt-8 bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">Weekly Overview</h2>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-xl font-semibold text-gray-900">Monthly Overview</h2>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCalendarMonth((previous) => new Date(previous.getFullYear(), previous.getMonth() - 1, 1))}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                aria-label="Previous month"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const today = new Date();
+                  setCalendarMonth(new Date(today.getFullYear(), today.getMonth(), 1));
+                }}
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                <CalendarDays className="h-4 w-4" />
+                Today
+              </button>
+              <button
+                type="button"
+                onClick={() => setCalendarMonth((previous) => new Date(previous.getFullYear(), previous.getMonth() + 1, 1))}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                aria-label="Next month"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          <p className="mb-4 text-sm text-gray-600">
+            {calendarMonth.toLocaleDateString("en-US", { month: "long", year: "numeric" })}
+          </p>
+
+          <div className="grid grid-cols-7 gap-2 text-center text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+            {weekDays.map((day) => (
+              <div key={day}>{day.slice(0, 3)}</div>
+            ))}
+          </div>
+
           <div className="grid grid-cols-7 gap-2">
-            {days.map((day) => {
-              const daySchedules = schedules.filter((s) => s.day === day);
+            {calendarDays.map((dateValue) => {
+              const daySchedules = getSchedulesForDate(dateValue)
+                .slice()
+                .sort((left, right) => timeToMinutes(left.timeStart) - timeToMinutes(right.timeStart));
+              const isCurrentMonth = dateValue.getMonth() === calendarMonth.getMonth();
+              const isToday = isSameDate(dateValue, new Date());
+              const isSelected = isSameDate(dateValue, selectedCalendarDate);
+
               return (
-                <div key={day} className="border border-gray-200 rounded-lg p-2">
-                  <h3 className="text-xs font-semibold text-gray-700 mb-2 text-center">
-                    {day.slice(0, 3)}
-                  </h3>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedCalendarDate(new Date(dateValue));
+                    setShowDaySchedulesModal(true);
+                  }}
+                  key={`${dateValue.getFullYear()}-${dateValue.getMonth()}-${dateValue.getDate()}`}
+                  className={`min-h-28 rounded-lg border p-2 ${
+                    isCurrentMonth ? "border-gray-200 bg-white" : "border-gray-100 bg-gray-50"
+                  } ${isToday ? "ring-2 ring-orange-400" : ""} ${isSelected ? "border-orange-400 ring-2 ring-orange-300" : ""} text-left hover:border-orange-300 hover:bg-orange-50/30 transition-colors`}
+                >
+                  <div className={`mb-2 text-xs font-semibold ${isCurrentMonth ? "text-gray-800" : "text-gray-400"}`}>
+                    {dateValue.getDate()}
+                  </div>
                   <div className="space-y-1">
-                    {daySchedules.map((schedule) => (
-                      <div
-                        key={schedule.id}
-                        className="bg-orange-50 rounded p-1 text-xs"
-                      >
-                        <p className="font-medium text-orange-700 truncate">
-                          {schedule.courseCode}
-                        </p>
-                        <p className="text-gray-600 text-[10px]">
-                          {schedule.timeStart}
-                        </p>
+                    {daySchedules.slice(0, 2).map((schedule) => (
+                      <div key={`${dateValue.toISOString()}-${schedule.id}`} className="rounded bg-orange-50 px-1.5 py-1 text-[10px]">
+                        <p className="truncate font-medium text-orange-700">{schedule.courseCode}</p>
+                        <p className="truncate text-gray-600">{schedule.timeStart} - {schedule.timeEnd}</p>
                       </div>
                     ))}
+                    {daySchedules.length > 2 && (
+                      <p className="text-[10px] font-medium text-orange-700">+{daySchedules.length - 2} more</p>
+                    )}
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>
+          <p className="mt-4 text-xs text-gray-500">Click a day to view all classes in a modal.</p>
         </div>
       </div>
+
+      {/* Day Schedules Modal */}
+      {showDaySchedulesModal && (
+        <div
+          className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setShowDaySchedulesModal(false)}
+        >
+          <div
+            className="w-full max-w-4xl overflow-hidden rounded-xl bg-white shadow-xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Classes on {selectedCalendarDate.toLocaleDateString("en-US", {
+                    weekday: "long",
+                    month: "long",
+                    day: "numeric",
+                    year: "numeric",
+                  })}
+                </h3>
+                <p className="text-sm text-gray-600">
+                  {selectedDateSchedules.length} class{selectedDateSchedules.length === 1 ? "" : "es"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDaySchedulesModal(false)}
+                className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                aria-label="Close class details modal"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="max-h-[70vh] overflow-y-auto px-5 py-4">
+              {selectedDateSchedules.length === 0 ? (
+                <p className="text-sm text-gray-600">No classes scheduled for this day.</p>
+              ) : (
+                <div className="space-y-2">
+                  {selectedDateSchedules.map((schedule) => (
+                    <div
+                      key={`modal-selected-${schedule.id}`}
+                      className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2"
+                    >
+                      <div className="flex flex-wrap items-center gap-2 text-sm">
+                        <span className="rounded bg-orange-100 px-2 py-0.5 font-semibold text-orange-700">
+                          {schedule.timeStart} - {schedule.timeEnd}
+                        </span>
+                        <span className="font-semibold text-gray-900">{schedule.courseCode}</span>
+                        {schedule.courseName && (
+                          <span className="text-gray-700">{schedule.courseName}</span>
+                        )}
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-3 text-xs text-gray-600">
+                        {schedule.section && <span>Section: {schedule.section}</span>}
+                        <span>Proctor: {schedule.instructor || 'Not assigned'}</span>
+                        {schedule.room && <span>Room: {schedule.room}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add Schedule Modal */}
       {showAddModal && (
