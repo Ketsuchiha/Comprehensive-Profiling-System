@@ -169,6 +169,19 @@ router.get('/:id', async (req, res) => {
        WHERE fl.faculty_id = ?`, [id]
     );
     const [research] = await pool.query('SELECT * FROM faculty_research WHERE faculty_id = ?', [id]);
+    let certifications = [];
+    try {
+      const [certRows] = await pool.query(
+        `SELECT cert_id, expertise AS certificate_name, certificate_file, mime_type, uploaded_at
+         FROM faculty_expertise_certifications
+         WHERE faculty_id = ?
+         ORDER BY uploaded_at DESC`,
+        [id]
+      );
+      certifications = certRows;
+    } catch (certErr) {
+      if (!isMissingTableError(certErr)) throw certErr;
+    }
 
     res.json({
       ...faculty[0],
@@ -176,7 +189,8 @@ router.get('/:id', async (req, res) => {
       employment: employment[0] || null,
       evaluations,
       load,
-      research
+      research,
+      certifications
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
