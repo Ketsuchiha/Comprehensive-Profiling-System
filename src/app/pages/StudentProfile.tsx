@@ -25,16 +25,61 @@ interface Student {
   skills: string;
 }
 
+interface PaginationMeta {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+
 export function StudentProfile() {
   const navigate = useNavigate();
   const [students, setStudents] = useState<Student[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [skillFilter, setSkillFilter] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState<PaginationMeta>({
+    page: 1,
+    limit: 10,
+    total: 0,
+    totalPages: 1,
+  });
+
+  const PAGE_SIZE = 10;
 
   const fetchStudents = async () => {
     try {
-      const data = await api.get<any[]>('/students');
-      setStudents(data.map(s => ({
+      const params = new URLSearchParams({
+        page: String(currentPage),
+        limit: String(PAGE_SIZE),
+      });
+      const normalizedSearch = searchQuery.trim();
+      const normalizedSkillFilter = skillFilter.trim();
+      if (normalizedSearch) params.set('search', normalizedSearch);
+      if (normalizedSkillFilter) params.set('skill', normalizedSkillFilter);
+
+      const response = await api.get<any[] | { data: any[]; pagination?: PaginationMeta }>(`/students?${params.toString()}`);
+      const isLegacyResponse = Array.isArray(response);
+      const allRows = isLegacyResponse ? response : (response.data || []);
+      const legacyOffset = (currentPage - 1) * PAGE_SIZE;
+      const rows = isLegacyResponse
+        ? allRows.slice(legacyOffset, legacyOffset + PAGE_SIZE)
+        : allRows;
+      const meta = isLegacyResponse
+        ? {
+          page: currentPage,
+          limit: PAGE_SIZE,
+          total: allRows.length,
+          totalPages: Math.max(1, Math.ceil(allRows.length / PAGE_SIZE)),
+        }
+        : (response.pagination || {
+          page: currentPage,
+          limit: PAGE_SIZE,
+          total: allRows.length,
+          totalPages: 1,
+        });
+
+      setStudents(rows.map(s => ({
         id: s.student_id,
         studentId: s.student_id,
         firstName: s.first_name,
@@ -55,6 +100,12 @@ export function StudentProfile() {
         religion: s.religion || '',
         skills: s.skills || '',
       })));
+      setPagination({
+        page: meta.page,
+        limit: meta.limit,
+        total: meta.total,
+        totalPages: Math.max(1, meta.totalPages),
+      });
     } catch (err) {
       console.error('Failed to fetch students:', err);
     }
@@ -62,28 +113,7 @@ export function StudentProfile() {
 
   useEffect(() => {
     fetchStudents();
-  }, []);
-
-  const filteredStudents = students.filter((student) => {
-    const normalizedSearch = searchQuery.toLowerCase().trim();
-    const normalizedSkillFilter = skillFilter.toLowerCase().trim();
-
-    const matchesSearch =
-      !normalizedSearch ||
-      `${student.firstName} ${student.lastName}`.toLowerCase().includes(normalizedSearch) ||
-      student.studentId.toLowerCase().includes(normalizedSearch);
-
-    const matchesSkill =
-      !normalizedSkillFilter ||
-      student.skills
-        .toLowerCase()
-        .split(',')
-        .map((skill) => skill.trim())
-        .filter(Boolean)
-        .some((skill) => skill.includes(normalizedSkillFilter));
-
-    return matchesSearch && matchesSkill;
-  });
+  }, [currentPage, searchQuery, skillFilter]);
 
   const handleDeleteStudent = async (id: string) => {
     if (confirm("Are you sure you want to delete this student?")) {
@@ -120,7 +150,10 @@ export function StudentProfile() {
                     type="text"
                     placeholder="Search by name or student ID..."
                     value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onChange={(e) => {
+                      setCurrentPage(1);
+                      setSearchQuery(e.target.value);
+                    }}
                     className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
                   />
                 </div>
@@ -128,21 +161,30 @@ export function StudentProfile() {
                   type="text"
                   placeholder="Filter by skill (e.g., Basketball)"
                   value={skillFilter}
-                  onChange={(e) => setSkillFilter(e.target.value)}
+                  onChange={(e) => {
+                    setCurrentPage(1);
+                    setSkillFilter(e.target.value);
+                  }}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
                 />
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setSkillFilter("Basketball")}
+                  onClick={() => {
+                    setCurrentPage(1);
+                    setSkillFilter("Basketball");
+                  }}
                   className="rounded-full bg-orange-100 px-3 py-1 text-xs font-semibold text-orange-700 hover:bg-orange-200"
                 >
                   Basketball
                 </button>
                 <button
                   type="button"
-                  onClick={() => setSkillFilter("Programming")}
+                  onClick={() => {
+                    setCurrentPage(1);
+                    setSkillFilter("Programming");
+                  }}
                   className="rounded-full bg-orange-100 px-3 py-1 text-xs font-semibold text-orange-700 hover:bg-orange-200"
                 >
                   Programming
@@ -150,7 +192,10 @@ export function StudentProfile() {
                 {skillFilter && (
                   <button
                     type="button"
-                    onClick={() => setSkillFilter("")}
+                    onClick={() => {
+                      setCurrentPage(1);
+                      setSkillFilter("");
+                    }}
                     className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-200"
                   >
                     Clear Skill Filter
@@ -198,7 +243,7 @@ export function StudentProfile() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {filteredStudents.map((student) => (
+                {students.map((student) => (
                   <tr key={student.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                       {student.studentId}
@@ -247,6 +292,29 @@ export function StudentProfile() {
                 ))}
               </tbody>
             </table>
+          </div>
+          <div className="flex flex-col gap-3 border-t border-gray-200 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-gray-600">
+              Showing page {pagination.page} of {pagination.totalPages} ({pagination.total} students)
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCurrentPage((previous) => Math.max(1, previous - 1))}
+                disabled={pagination.page <= 1}
+                className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                onClick={() => setCurrentPage((previous) => Math.min(pagination.totalPages, previous + 1))}
+                disabled={pagination.page >= pagination.totalPages}
+                className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
           </div>
         </div>
       </div>
