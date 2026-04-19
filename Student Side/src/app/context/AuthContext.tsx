@@ -14,6 +14,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
+  updateUser: (changes: Partial<User>) => void;
 }
 
 const STORAGE_KEY = 'ccs_student_user';
@@ -64,6 +65,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem(STORAGE_KEY);
   };
 
+  const updateUser = (changes: Partial<User>) => {
+    setUser((previous) => {
+      if (!previous) return previous;
+      const nextUser = { ...previous, ...changes };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextUser));
+      return nextUser;
+    });
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -71,6 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: !!user,
         login,
         logout,
+        updateUser,
       }}
     >
       {children}

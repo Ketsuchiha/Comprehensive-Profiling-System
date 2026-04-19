@@ -7,11 +7,13 @@ import AcademicProfile from "./pages/AcademicProfile";
 import AcademicRecords from "./pages/AcademicRecords";
 import Activities from "./pages/Activities";
 import Login from "./pages/Login";
+import RouteErrorFallback from "./components/RouteErrorFallback";
 
 export const router = createBrowserRouter([
   {
     path: "/login",
     Component: Login,
+    errorElement: <RouteErrorFallback />,
   },
   {
     path: "/",
@@ -20,6 +22,7 @@ export const router = createBrowserRouter([
         <Layout />
       </ProtectedRoute>
     ),
+    errorElement: <RouteErrorFallback />,
     children: [
       { index: true, Component: Dashboard },
       { path: "profile", Component: Profile },

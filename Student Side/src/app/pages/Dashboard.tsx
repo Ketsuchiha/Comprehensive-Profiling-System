@@ -1,55 +1,71 @@
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { Calendar } from "../components/ui/calendar";
-import { AlertCircle, Calendar as CalendarIcon, TrendingUp, BookOpen, Bell } from "lucide-react";
+import { AlertCircle, Calendar as CalendarIcon, TrendingUp, BookOpen, Bell, MapPin, Clock } from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../utils/api";
 import { useAuth } from "../context/AuthContext";
 import buildingImage from "../../assets/b65a68daf197ee46f7b02d7da02ee101a668ac79.png";
 
-const mockViolations = [
-  {
-    id: 1,
-    type: "Late Submission",
-    subject: "Math 101",
-    date: "2026-02-28",
-    description: "Assignment submitted 2 hours late for Math 101",
-    severity: "Warning",
-  },
-  {
-    id: 2,
-    type: "Absence",
-    subject: "Physics Lab Session",
-    date: "2026-02-25",
-    description: "Unauthorized absence from Physics Lab Session",
-    severity: "Serious",
-  },
-  {
-    id: 3,
-    type: "Dress Code Violation",
-    subject: "School Dress Code",
-    date: "2026-02-20",
-    description: "Did not comply with school dress code on Jan 5",
-    severity: "Warning",
-  },
-];
+type ViolationRecord = {
+  violation_id: number;
+  violation_type: string;
+  subject_context: string | null;
+  description: string | null;
+  severity: string | null;
+  status: string | null;
+  incident_date: string;
+};
 
-const mockEvents = [
-  { id: 1, title: "Midterm Exams", type: "Academic", description: "Comprehensive midterm examination", date: new Date(2026, 2, 20), time: "08:00 AM", location: "Exam Hall A" },
-  { id: 2, title: "Sports Festival", type: "Event", description: "Annual inter-school sports competition", date: new Date(2026, 2, 25), time: "08:00 AM", location: "Sports Complex" },
-  { id: 3, title: "Project Submission Deadline", type: "Deadline", description: "Final project submission for all courses", date: new Date(2026, 2, 18), time: "11:59 PM", location: "Online Portal" },
-  { id: 4, title: "Career Fair", type: "Event", date: new Date(2026, 2, 10), time: "09:00 AM", location: "Main Auditorium" },
-  { id: 5, title: "Department Seminar", type: "Academic", date: new Date(2026, 2, 5), time: "02:00 PM", location: "Conference Room" },
-];
+type EventRecord = {
+  event_id: number;
+  title: string;
+  description: string | null;
+  event_type: string | null;
+  venue: string | null;
+  start_date: string;
+  end_date: string;
+  status: string | null;
+  attendance: string | null;
+};
+
+function toDate(value: string | null) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatDate(value: string) {
+  const date = toDate(value);
+  if (!date) return value;
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function formatDateTime(value: string) {
+  const date = toDate(value);
+  if (!date) return value;
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function toNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
   const [summary, setSummary] = useState<{
     total_subjects: number;
     average_final_grade: number | null;
     total_schedules: number;
     registered_events: number;
+    active_violations?: number;
   } | null>(null);
   const [student, setStudent] = useState<{
     student_id: string;
@@ -58,6 +74,8 @@ export default function Dashboard() {
     year_level: number | null;
     section: string | null;
   } | null>(null);
+  const [violations, setViolations] = useState<ViolationRecord[]>([]);
+  const [events, setEvents] = useState<EventRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   const getSeverityColor = (severity: string) => {
@@ -106,31 +124,43 @@ export default function Dashboard() {
     let isMounted = true;
     setLoading(true);
 
-    api
-      .get<{
-        student: {
-          student_id: string;
-          first_name: string;
-          last_name: string;
-          year_level: number | null;
-          section: string | null;
-        };
-        summary: {
-          total_subjects: number;
-          average_final_grade: number | null;
-          total_schedules: number;
-          registered_events: number;
-        };
-      }>(`/students/${encodeURIComponent(user.refId)}/dashboard`)
-      .then((data) => {
+    Promise.all([
+      api
+        .get<{
+          student: {
+            student_id: string;
+            first_name: string;
+            last_name: string;
+            year_level: number | null;
+            section: string | null;
+          };
+          summary: {
+            total_subjects: number;
+            average_final_grade: number | null;
+            total_schedules: number;
+            registered_events: number;
+            active_violations?: number;
+          };
+        }>(`/students/${encodeURIComponent(user.refId)}/dashboard`)
+        .catch(() => null),
+      api.get<ViolationRecord[]>(`/students/${encodeURIComponent(user.refId)}/violations`).catch(() => []),
+      api.get<EventRecord[]>(`/students/${encodeURIComponent(user.refId)}/events`).catch(() => []),
+    ])
+      .then(([dashboardData, violationData, eventData]) => {
         if (!isMounted) return;
-        setStudent(data.student);
-        setSummary(data.summary);
-      })
-      .catch(() => {
-        if (!isMounted) return;
-        setStudent(null);
-        setSummary(null);
+        const normalizedSummary = dashboardData?.summary
+          ? {
+              total_subjects: toNumber(dashboardData.summary.total_subjects) ?? 0,
+              average_final_grade: toNumber(dashboardData.summary.average_final_grade),
+              total_schedules: toNumber(dashboardData.summary.total_schedules) ?? 0,
+              registered_events: toNumber(dashboardData.summary.registered_events) ?? 0,
+              active_violations: toNumber(dashboardData.summary.active_violations) ?? undefined,
+            }
+          : null;
+        setStudent(dashboardData?.student || null);
+        setSummary(normalizedSummary);
+        setViolations(violationData);
+        setEvents(eventData);
       })
       .finally(() => {
         if (!isMounted) return;
@@ -152,13 +182,33 @@ export default function Dashboard() {
     return `Student ID: ${student.student_id} • Year ${student.year_level ?? "-"} • Section ${student.section || "-"}`;
   }, [student, user?.refId]);
 
-  const currentGpa = summary?.average_final_grade != null ? summary.average_final_grade.toFixed(2) : "-";
-  const eventDates = mockEvents.map(event => event.date);
+  const currentGpa =
+    summary?.average_final_grade != null && Number.isFinite(summary.average_final_grade)
+      ? summary.average_final_grade.toFixed(2)
+      : "-";
 
-  const upcomingEvents = mockEvents
-    .filter(event => event.date >= new Date())
-    .sort((a, b) => a.date.getTime() - b.date.getTime())
-    .slice(0, 3);
+  const activeViolationCount = summary?.active_violations ?? violations.filter((violation) => violation.status === "Active").length;
+
+  const upcomingEvents = useMemo(() => {
+    const now = new Date();
+    return events
+      .filter((event) => {
+        const startDate = toDate(event.start_date);
+        return startDate ? startDate >= now : false;
+      })
+      .sort((left, right) => {
+        const leftDate = toDate(left.start_date);
+        const rightDate = toDate(right.start_date);
+        if (!leftDate || !rightDate) return 0;
+        return leftDate.getTime() - rightDate.getTime();
+      })
+      .slice(0, 4);
+  }, [events]);
+
+  const recentViolations = useMemo(
+    () => [...violations].slice(0, 4),
+    [violations]
+  );
 
   return (
     <div className="space-y-6">
@@ -206,7 +256,7 @@ export default function Dashboard() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-600">Active Violations</p>
-                <p className="text-4xl font-semibold text-orange-600 mt-2">{mockViolations.length}</p>
+                <p className="text-4xl font-semibold text-orange-600 mt-2">{activeViolationCount}</p>
               </div>
               <div className="w-12 h-12 rounded-xl bg-yellow-100 flex items-center justify-center">
                 <AlertCircle className="h-6 w-6 text-orange-600" />
@@ -245,30 +295,31 @@ export default function Dashboard() {
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
-            {mockViolations.map((violation) => (
-              <div
-                key={violation.id}
-                className={`rounded-lg p-4 border-l-4 ${getSeverityColor(violation.severity)}`}
-              >
-                <div className="flex items-start justify-between mb-2">
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <h4 className="font-medium text-gray-900">{violation.type}</h4>
-                      <Badge variant="outline" className={`${getSeverityColor(violation.severity)} text-xs`}>
-                        {violation.severity}
-                      </Badge>
+            {loading ? (
+              <p className="text-sm text-gray-500">Loading violations...</p>
+            ) : recentViolations.length === 0 ? (
+              <p className="text-sm text-gray-500">No violation records found.</p>
+            ) : (
+              recentViolations.map((violation) => (
+                <div
+                  key={violation.violation_id}
+                  className={`rounded-lg p-4 border-l-4 ${getSeverityColor(violation.severity || "Warning")}`}
+                >
+                  <div className="flex items-start justify-between mb-2">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <h4 className="font-medium text-gray-900">{violation.violation_type}</h4>
+                        <Badge variant="outline" className={`${getSeverityColor(violation.severity || "Warning")} text-xs`}>
+                          {violation.severity || "Warning"}
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-gray-600">{violation.description || violation.subject_context || "No description"}</p>
                     </div>
-                    <p className="text-sm text-gray-600">{violation.description}</p>
                   </div>
+                  <p className="text-xs text-gray-500 mt-2">{formatDate(violation.incident_date)}</p>
                 </div>
-                <p className="text-xs text-gray-500 mt-2">
-                  {new Date(violation.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                </p>
-              </div>
-            ))}
-            <button className="text-sm text-orange-600 hover:text-orange-700 font-medium w-full text-center py-2">
-              View All Violations →
-            </button>
+              ))
+            )}
           </CardContent>
         </Card>
 
@@ -286,81 +337,42 @@ export default function Dashboard() {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Calendar Header */}
-            <div className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-lg">
-              <div className="flex items-center gap-2">
-                <button className="p-1 hover:bg-gray-200 rounded">
-                  <span className="text-gray-600">←</span>
-                </button>
-                <span className="font-medium text-gray-900">March 2026</span>
-                <button className="p-1 hover:bg-gray-200 rounded">
-                  <span className="text-gray-600">→</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Mini Calendar View */}
-            <div className="grid grid-cols-7 gap-1 text-center text-xs mb-4">
-              {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
-                <div key={day} className="text-gray-500 font-medium py-1">{day}</div>
-              ))}
-              {/* Calendar days - simplified */}
-              {Array.from({ length: 31 }, (_, i) => {
-                const day = i + 1;
-                const hasEvent = upcomingEvents.some(e => e.date.getDate() === day && e.date.getMonth() === 2);
-                return (
+            {loading ? (
+              <p className="text-sm text-gray-500">Loading events...</p>
+            ) : upcomingEvents.length === 0 ? (
+              <p className="text-sm text-gray-500">No upcoming events found.</p>
+            ) : (
+              <div className="space-y-3">
+                {upcomingEvents.map((event) => (
                   <div
-                    key={day}
-                    className={`py-1.5 rounded ${
-                      hasEvent 
-                        ? "bg-orange-500 text-white font-medium" 
-                        : day === 3 
-                        ? "bg-gray-200 text-gray-900 font-medium" 
-                        : "text-gray-700"
-                    }`}
+                    key={event.event_id}
+                    className={`rounded-lg p-3 border ${getEventTypeColor(event.event_type || "Event")}`}
                   >
-                    {day}
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Event List */}
-            <div className="space-y-3">
-              {upcomingEvents.map((event) => (
-                <div
-                  key={event.id}
-                  className={`rounded-lg p-3 border ${getEventTypeColor(event.type)}`}
-                >
-                  <div className="flex items-start justify-between mb-2">
-                    <h4 className={`font-medium ${getEventTypeTextColor(event.type)}`}>
-                      {event.title}
-                    </h4>
-                    <Badge variant="outline" className={`${getEventTypeColor(event.type)} text-xs border-0 ${getEventTypeTextColor(event.type)}`}>
-                      {event.type}
-                    </Badge>
-                  </div>
-                  {event.description && (
-                    <p className="text-sm text-gray-600 mb-2">{event.description}</p>
-                  )}
-                  <div className="flex items-center gap-3 text-xs text-gray-600">
-                    <span className="flex items-center gap-1">
-                      📅 {event.date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
-                    </span>
-                    {event.time && (
-                      <span className="flex items-center gap-1">
-                        🕐 {event.time}
-                      </span>
+                    <div className="flex items-start justify-between mb-2 gap-2">
+                      <h4 className={`font-medium ${getEventTypeTextColor(event.event_type || "Event")}`}>
+                        {event.title}
+                      </h4>
+                      <Badge variant="outline" className={`${getEventTypeColor(event.event_type || "Event")} text-xs border-0 ${getEventTypeTextColor(event.event_type || "Event")}`}>
+                        {event.event_type || "Event"}
+                      </Badge>
+                    </div>
+                    {event.description && (
+                      <p className="text-sm text-gray-600 mb-2">{event.description}</p>
                     )}
-                    {event.location && (
-                      <span className="flex items-center gap-1">
-                        📍 {event.location}
-                      </span>
-                    )}
+                    <div className="space-y-1 text-xs text-gray-600">
+                      <p className="flex items-center gap-1">
+                        <Clock className="h-3.5 w-3.5" />
+                        <span>{formatDateTime(event.start_date)} to {formatDateTime(event.end_date)}</span>
+                      </p>
+                      <p className="flex items-center gap-1">
+                        <MapPin className="h-3.5 w-3.5" />
+                        <span>{event.venue || "Venue TBA"}</span>
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

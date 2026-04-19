@@ -7,13 +7,16 @@ import { useAuth } from "../context/AuthContext";
 
 type AcademicRecord = {
   program: string | null;
-  major: string | null;
   track: string | null;
   year_level: number | null;
   section: string | null;
   scholarship_type: string | null;
   enrollment_status: string | null;
   admission_date: string | null;
+};
+
+type ScheduleRecord = {
+  section: string | null;
 };
 
 type CourseRecord = {
@@ -29,6 +32,7 @@ export default function AcademicProfile() {
   const [academic, setAcademic] = useState<AcademicRecord | null>(null);
   const [courses, setCourses] = useState<CourseRecord[]>([]);
   const [grades, setGrades] = useState<GradeRecord[]>([]);
+  const [schedules, setSchedules] = useState<ScheduleRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -44,12 +48,14 @@ export default function AcademicProfile() {
       api.get<AcademicRecord>(`/students/${encodeURIComponent(user.refId)}/academic`).catch(() => null),
       api.get<CourseRecord[]>(`/students/${encodeURIComponent(user.refId)}/courses`).catch(() => []),
       api.get<GradeRecord[]>(`/students/${encodeURIComponent(user.refId)}/grades`).catch(() => []),
+      api.get<ScheduleRecord[]>(`/students/${encodeURIComponent(user.refId)}/schedules`).catch(() => []),
     ])
-      .then(([academicData, courseData, gradeData]) => {
+      .then(([academicData, courseData, gradeData, scheduleData]) => {
         if (!isMounted) return;
         setAcademic(academicData);
         setCourses(courseData);
         setGrades(gradeData);
+        setSchedules(scheduleData);
       })
       .finally(() => {
         if (!isMounted) return;
@@ -69,6 +75,7 @@ export default function AcademicProfile() {
   }, [grades]);
 
   const yearLevelLabel = academic?.year_level ? `${academic.year_level}${academic.year_level === 1 ? "st" : academic.year_level === 2 ? "nd" : academic.year_level === 3 ? "rd" : "th"} Year` : "-";
+  const sectionLabel = academic?.section || schedules.find((schedule) => schedule.section)?.section || "-";
   const admissionDateLabel = academic?.admission_date
     ? new Date(academic.admission_date).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
     : "-";
@@ -165,8 +172,8 @@ export default function AcademicProfile() {
                 </div>
 
                 <div className="space-y-2 p-4 rounded-lg bg-gray-50 border border-gray-100">
-                  <label className="text-xs uppercase tracking-wide font-medium text-gray-500">Major</label>
-                  <p className="text-gray-900 font-medium">{academic?.major || academic?.track || "-"}</p>
+                  <label className="text-xs uppercase tracking-wide font-medium text-gray-500">Track</label>
+                  <p className="text-gray-900 font-medium">{academic?.track || "-"}</p>
                 </div>
 
                 <div className="space-y-2 p-4 rounded-lg bg-gray-50 border border-gray-100">
@@ -181,7 +188,7 @@ export default function AcademicProfile() {
                     <Users className="h-3 w-3" />
                     Section
                   </label>
-                  <p className="text-gray-900 font-medium">{academic?.section || "-"}</p>
+                  <p className="text-gray-900 font-medium">{sectionLabel}</p>
                 </div>
 
                 <div className="space-y-2 p-4 rounded-lg bg-gray-50 border border-gray-100">
