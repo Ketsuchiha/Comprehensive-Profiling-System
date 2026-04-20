@@ -1,6 +1,9 @@
 import { Outlet, Link, useLocation, useNavigate } from "react-router";
 import { 
   LayoutDashboard, 
+  BookOpen,
+  Files,
+  CalendarDays,
   User, 
   Menu,
   X,
@@ -33,6 +36,9 @@ export default function Layout() {
 
   const navigation = [
     { name: "Dashboard", href: "/", icon: LayoutDashboard },
+    { name: "Subjects", href: "/subjects", icon: BookOpen },
+    { name: "Modules", href: "/modules", icon: Files },
+    { name: "Schedule", href: "/schedule", icon: CalendarDays },
     { name: "Profile", href: "/profile", icon: User },
   ];
 
