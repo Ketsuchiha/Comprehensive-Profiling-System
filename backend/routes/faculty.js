@@ -103,6 +103,16 @@ function parsePagination(query) {
   };
 }
 
+function normalizeSubjectCodeInput(value) {
+  if (typeof value !== 'string') return '';
+  return value.trim().toUpperCase();
+}
+
+function toSafeNumber(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 async function generateNextAssignedSection() {
   try {
     const [rows] = await pool.query(
@@ -125,6 +135,26 @@ async function generateNextAssignedSection() {
 async function hasFacultyCertificationTable() {
   const [rows] = await pool.query("SHOW TABLES LIKE 'faculty_expertise_certifications'");
   return rows.length > 0;
+}
+
+async function getFacultyCertificationsForProfile(facultyId) {
+  const hasCertTable = await hasFacultyCertificationTable();
+  if (!hasCertTable) return [];
+
+  const [rows] = await pool.query(
+    `SELECT cert_id, faculty_id,
+            expertise AS certificate_name,
+            expertise,
+            certificate_file,
+            mime_type,
+            uploaded_at
+     FROM faculty_expertise_certifications
+     WHERE faculty_id = ?
+     ORDER BY uploaded_at DESC`,
+    [facultyId]
+  );
+
+  return rows;
 }
 
 async function getFacultyExpertiseValues(facultyId, specialization) {
@@ -279,6 +309,7 @@ router.get('/:id', async (req, res) => {
        WHERE fl.faculty_id = ?`, [id]
     );
     const [research] = await pool.query('SELECT * FROM faculty_research WHERE faculty_id = ?', [id]);
+    const certifications = await getFacultyCertificationsForProfile(id);
 
     res.json({
       ...faculty[0],
@@ -286,7 +317,8 @@ router.get('/:id', async (req, res) => {
       employment: employment[0] || null,
       evaluations,
       load,
-      research
+      research,
+      certifications,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -317,20 +349,26 @@ router.get('/:id/dashboard', async (req, res) => {
       [id]
     );
 
-    const [syllabusSummary] = await pool.query(
-      `SELECT COUNT(*) AS authored_syllabi
-       FROM syllabus
-       WHERE faculty_id = ?`,
-      [id]
-    );
+    let authoredSyllabi = 0;
+    try {
+      const [syllabusSummary] = await pool.query(
+        `SELECT COUNT(*) AS authored_syllabi
+         FROM syllabus
+         WHERE faculty_id = ?`,
+        [id]
+      );
+      authoredSyllabi = toSafeNumber(syllabusSummary[0]?.authored_syllabi, 0);
+    } catch (err) {
+      if (!isMissingTableError(err)) throw err;
+    }
 
     res.json({
       faculty: faculty[0],
       summary: {
-        assigned_classes: loadSummary[0].assigned_classes,
-        total_teaching_units: loadSummary[0].total_teaching_units,
-        research_outputs: researchSummary[0].research_outputs,
-        authored_syllabi: syllabusSummary[0].authored_syllabi
+        assigned_classes: toSafeNumber(loadSummary[0]?.assigned_classes, 0),
+        total_teaching_units: toSafeNumber(loadSummary[0]?.total_teaching_units, 0),
+        research_outputs: toSafeNumber(researchSummary[0]?.research_outputs, 0),
+        authored_syllabi: authoredSyllabi
       }
     });
   } catch (err) {
@@ -867,6 +905,135 @@ router.get('/:id/load', async (req, res) => {
        WHERE fl.faculty_id = ?`, [req.params.id]
     );
     res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /:id/modules - Faculty teaching subjects and module content
+router.get('/:id/modules', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const subjectCodeFilter = normalizeSubjectCodeInput(req.query.subject_code);
+
+    const [facultyRows] = await pool.query(
+      'SELECT faculty_id, first_name, last_name FROM faculty WHERE faculty_id = ? LIMIT 1',
+      [id]
+    );
+    if (facultyRows.length === 0) {
+      return res.status(404).json({ error: 'Faculty not found' });
+    }
+
+    const loadFilterClause = subjectCodeFilter ? ' AND fl.subject_code = ?' : '';
+    const loadParams = subjectCodeFilter ? [id, subjectCodeFilter] : [id];
+
+    const [assignedSubjects] = await pool.query(
+      `SELECT fl.load_id, fl.subject_code, s.subject_name, fl.section, fl.semester, fl.academic_year, fl.teaching_units
+       FROM faculty_load fl
+       LEFT JOIN subjects s ON fl.subject_code = s.subject_code
+       WHERE fl.faculty_id = ?${loadFilterClause}
+       ORDER BY fl.academic_year DESC, fl.semester DESC, fl.subject_code`,
+      loadParams
+    );
+
+    if (subjectCodeFilter && assignedSubjects.length === 0) {
+      return res.status(404).json({
+        error: `Subject ${subjectCodeFilter} is not currently assigned to this faculty member.`,
+      });
+    }
+
+    let modules = [];
+    let syllabusTablesAvailable = true;
+
+    try {
+      const syllabusFilterClause = subjectCodeFilter ? ' AND sy.subject_code = ?' : '';
+      const syllabusParams = subjectCodeFilter ? [id, subjectCodeFilter] : [id];
+
+      const [syllabusRows] = await pool.query(
+        `SELECT sy.syllabus_id, sy.subject_code, s.subject_name, sy.faculty_id,
+                sy.semester, sy.academic_year, sy.course_description,
+                sy.course_outcomes, sy.grading_system, sy.references_biblio,
+                sy.approved_by, sy.is_approved, sy.created_at
+         FROM syllabus sy
+         LEFT JOIN subjects s ON sy.subject_code = s.subject_code
+         WHERE sy.faculty_id = ?${syllabusFilterClause}
+         ORDER BY sy.created_at DESC`,
+        syllabusParams
+      );
+
+      if (syllabusRows.length > 0) {
+        const syllabusIds = syllabusRows.map((row) => row.syllabus_id);
+        const syllabusPlaceholders = syllabusIds.map(() => '?').join(', ');
+
+        let topicRows = [];
+        let lessonRows = [];
+
+        try {
+          const [topics] = await pool.query(
+            `SELECT topic_id, syllabus_id, week_number, topic_title, description, teaching_method, assessment
+             FROM syllabus_topics
+             WHERE syllabus_id IN (${syllabusPlaceholders})
+             ORDER BY week_number, topic_id`,
+            syllabusIds
+          );
+          topicRows = topics;
+        } catch (topicErr) {
+          if (!isMissingTableError(topicErr)) throw topicErr;
+        }
+
+        if (topicRows.length > 0) {
+          const topicIds = topicRows.map((row) => row.topic_id);
+          const topicPlaceholders = topicIds.map(() => '?').join(', ');
+
+          try {
+            const [lessons] = await pool.query(
+              `SELECT lesson_id, topic_id, title, content_type, file_path, external_url,
+                      is_published, published_at, created_at
+               FROM lessons
+               WHERE topic_id IN (${topicPlaceholders})
+               ORDER BY created_at DESC, lesson_id DESC`,
+              topicIds
+            );
+            lessonRows = lessons;
+          } catch (lessonErr) {
+            if (!isMissingTableError(lessonErr)) throw lessonErr;
+          }
+        }
+
+        const lessonsByTopicId = new Map();
+        lessonRows.forEach((lesson) => {
+          const entries = lessonsByTopicId.get(lesson.topic_id) || [];
+          entries.push(lesson);
+          lessonsByTopicId.set(lesson.topic_id, entries);
+        });
+
+        const topicsBySyllabusId = new Map();
+        topicRows.forEach((topic) => {
+          const entries = topicsBySyllabusId.get(topic.syllabus_id) || [];
+          entries.push({
+            ...topic,
+            lessons: lessonsByTopicId.get(topic.topic_id) || [],
+          });
+          topicsBySyllabusId.set(topic.syllabus_id, entries);
+        });
+
+        modules = syllabusRows.map((syllabus) => ({
+          ...syllabus,
+          topics: topicsBySyllabusId.get(syllabus.syllabus_id) || [],
+        }));
+      }
+    } catch (syllabusErr) {
+      if (!isMissingTableError(syllabusErr)) throw syllabusErr;
+      syllabusTablesAvailable = false;
+    }
+
+    res.json({
+      faculty: facultyRows[0],
+      subject_code_filter: subjectCodeFilter || null,
+      assigned_subjects: assignedSubjects,
+      modules,
+      warnings: syllabusTablesAvailable ? [] : ['Syllabus tables are not available in this database yet.'],
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
