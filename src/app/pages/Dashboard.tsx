@@ -8,6 +8,45 @@ import {
 import { api } from "../utils/api";
 import buildingImage from "../../assets/b65a68daf197ee46f7b02d7da02ee101a668ac79.png";
 
+type DashboardCounts = {
+  studentCount: number;
+  facultyCount: number;
+  eventCount: number;
+  researchCount: number;
+};
+
+type DashboardProps = {
+  fetchDashboardCounts?: () => Promise<DashboardCounts>;
+};
+
+async function defaultFetchDashboardCounts(): Promise<DashboardCounts> {
+  const [students, faculty, events, research] = await Promise.all([
+    api.get<unknown[]>('/students').catch((err) => {
+      console.error('Failed to fetch students:', err);
+      return [];
+    }),
+    api.get<unknown[]>('/faculty').catch((err) => {
+      console.error('Failed to fetch faculty:', err);
+      return [];
+    }),
+    api.get<unknown[]>('/events').catch((err) => {
+      console.error('Failed to fetch events:', err);
+      return [];
+    }),
+    api.get<unknown[]>('/research').catch((err) => {
+      console.error('Failed to fetch research:', err);
+      return [];
+    }),
+  ]);
+
+  return {
+    studentCount: Array.isArray(students) ? students.length : 0,
+    facultyCount: Array.isArray(faculty) ? faculty.length : 0,
+    eventCount: Array.isArray(events) ? events.length : 0,
+    researchCount: Array.isArray(research) ? research.length : 0,
+  };
+}
+
 const recentActivities = [
   { title: "New student enrolled", time: "2 hours ago", type: "student" },
   { title: "Research paper submitted", time: "5 hours ago", type: "research" },
@@ -15,7 +54,7 @@ const recentActivities = [
   { title: "Syllabus updated for CS101", time: "2 days ago", type: "instrument" },
 ];
 
-export function Dashboard() {
+export function Dashboard({ fetchDashboardCounts = defaultFetchDashboardCounts }: DashboardProps) {
   const [studentCount, setStudentCount] = useState(0);
   const [facultyCount, setFacultyCount] = useState(0);
   const [eventCount, setEventCount] = useState(0);
@@ -24,22 +63,17 @@ export function Dashboard() {
   useEffect(() => {
     const fetchCounts = async () => {
       try {
-        const [students, faculty, events, research] = await Promise.all([
-          api.get<any[]>('/students').catch((err) => { console.error('Failed to fetch students:', err); return []; }),
-          api.get<any[]>('/faculty').catch((err) => { console.error('Failed to fetch faculty:', err); return []; }),
-          api.get<any[]>('/events').catch((err) => { console.error('Failed to fetch events:', err); return []; }),
-          api.get<any[]>('/research').catch((err) => { console.error('Failed to fetch research:', err); return []; }),
-        ]);
-        setStudentCount(Array.isArray(students) ? students.length : 0);
-        setFacultyCount(Array.isArray(faculty) ? faculty.length : 0);
-        setEventCount(Array.isArray(events) ? events.length : 0);
-        setResearchCount(Array.isArray(research) ? research.length : 0);
+        const counts = await fetchDashboardCounts();
+        setStudentCount(counts.studentCount);
+        setFacultyCount(counts.facultyCount);
+        setEventCount(counts.eventCount);
+        setResearchCount(counts.researchCount);
       } catch (err) {
         console.error('Failed to fetch dashboard counts:', err);
       }
     };
     fetchCounts();
-  }, []);
+  }, [fetchDashboardCounts]);
 
   const stats = [
     { name: "Total Students", value: studentCount.toLocaleString(), icon: GraduationCap, color: "bg-blue-500" },

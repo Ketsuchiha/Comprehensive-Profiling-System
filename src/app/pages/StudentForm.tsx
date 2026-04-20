@@ -65,6 +65,7 @@ export function StudentForm() {
       .get<any>(`/students/${encodeURIComponent(studentId)}`)
       .then((s) => {
         if (!isMounted) return;
+        const resolvedSection = s.academic?.section || s.section || "";
         setFormData({
           studentId: s.student_id || "",
           firstName: s.first_name || "",
@@ -72,7 +73,7 @@ export function StudentForm() {
           lastName: s.last_name || "",
           program: s.academic?.program || "",
           yearLevel: s.academic?.year_level ? String(s.academic.year_level) : "",
-          section: s.academic?.section || "",
+          section: resolvedSection,
           dateOfBirth: s.birth_date ? String(s.birth_date).split("T")[0] : "",
           sex: s.sex || "Male",
           civilStatus: s.civil_status || "Single",
@@ -154,6 +155,7 @@ export function StudentForm() {
       nationality: formData.nationality.trim(),
       religion: formData.religion.trim(),
       skills: formData.skills.trim(),
+      section: formData.section.trim() || null,
     };
 
     setSaving(true);
@@ -216,7 +218,7 @@ export function StudentForm() {
               )}
 
               <div>
-                <label classNae="block text-s font-semibold text-gray-700 mb-1">Student ID *</label>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Student ID *</label>
                 <input
                   type="text"
                   required

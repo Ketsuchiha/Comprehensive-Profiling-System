@@ -644,7 +644,6 @@ export function Instruments() {
                   >
                     <option value="syllabus">Syllabus</option>
                     <option value="lesson">Lesson</option>
-                    <option value="conclusion">Conclusion</option>
                   </select>
                 </div>
                 <div>

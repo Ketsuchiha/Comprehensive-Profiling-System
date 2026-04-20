@@ -8,6 +8,7 @@ export function StudentDetails() {
   const [student, setStudent] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const resolvedSection = student?.academic?.section || student?.section || "-";
 
   useEffect(() => {
     if (!studentId) {
@@ -61,7 +62,7 @@ export function StudentDetails() {
             <div><p className="text-sm font-semibold text-gray-600">Last Name</p><p className="mt-1">{student.last_name}</p></div>
             <div><p className="text-sm font-semibold text-gray-600">Date of Birth</p><p className="mt-1">{String(student.birth_date || "").split("T")[0] || "-"}</p></div>
             <div><p className="text-sm font-semibold text-gray-600">Program</p><p className="mt-1">{student.academic?.program || "-"}</p></div>
-            <div><p className="text-sm font-semibold text-gray-600">Year / Section</p><p className="mt-1">{student.academic?.year_level || "-"} / {student.academic?.section || "-"}</p></div>
+            <div><p className="text-sm font-semibold text-gray-600">Year / Section</p><p className="mt-1">{student.academic?.year_level || "-"} / {resolvedSection}</p></div>
             <div><p className="text-sm font-semibold text-gray-600">Sex</p><p className="mt-1">{student.sex || "-"}</p></div>
             <div><p className="text-sm font-semibold text-gray-600">Civil Status</p><p className="mt-1">{student.civil_status || "-"}</p></div>
             <div><p className="text-sm font-semibold text-gray-600">Contact Number</p><p className="mt-1">{student.contact_number || "-"}</p></div>
