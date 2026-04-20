@@ -2,6 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Mail, Phone, MapPin, AlertCircle, Camera, KeyRound, Edit3, Save, X, Eye, EyeOff } from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router";
 import { api } from "../utils/api";
 import { useAuth } from "../context/AuthContext";
 import {
@@ -47,6 +48,8 @@ const fallbackProfilePhoto = "https://images.unsplash.com/photo-1600178572204-6a
 
 export default function Profile() {
   const { user, updateUser } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [student, setStudent] = useState<StudentRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -245,6 +248,16 @@ export default function Profile() {
       setSavingPassword(false);
     }
   };
+
+  useEffect(() => {
+    if (loading || !student) return;
+
+    const params = new URLSearchParams(location.search);
+    if (params.get("forceChangePassword") !== "1") return;
+
+    openPasswordModal();
+    navigate(location.pathname, { replace: true });
+  }, [loading, student, location.pathname, location.search, navigate]);
 
   if (loading) {
     return (

@@ -5,23 +5,68 @@ import {
   Files,
   CalendarDays,
   User, 
+  ListChecks,
+  Calculator,
+  FlaskConical,
+  FileText,
   Menu,
   X,
   LogOut
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
+import { api } from "../utils/api";
+import { resolveFacultyId } from "../utils/facultySession";
 import logoImage from "../../assets/70c26a9cf9f6ef2d16948997d7c954b67149d16d.png";
 import buildingImage from "../../assets/b65a68daf197ee46f7b02d7da02ee101a668ac79.png";
+
+type FacultyIdentity = {
+  faculty_id: string;
+  first_name: string;
+  middle_name: string | null;
+  last_name: string;
+};
 
 export default function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [liveIdentity, setLiveIdentity] = useState<{ name: string; refId: string } | null>(null);
   const { user, logout } = useAuth();
 
-  const displayName = user?.name || user?.email || "Faculty";
-  const displayRefId = user?.refId || "N/A";
+  useEffect(() => {
+    let isMounted = true;
+
+    if (!user) {
+      setLiveIdentity(null);
+      return;
+    }
+
+    resolveFacultyId(user)
+      .then((facultyId) => api.get<FacultyIdentity>(`/faculty/${encodeURIComponent(facultyId)}`))
+      .then((faculty) => {
+        if (!isMounted) return;
+        const fullName = [faculty.first_name, faculty.middle_name, faculty.last_name]
+          .filter(Boolean)
+          .join(" ")
+          .trim();
+        setLiveIdentity({
+          name: fullName || user.name || user.email || "Faculty",
+          refId: faculty.faculty_id,
+        });
+      })
+      .catch(() => {
+        if (!isMounted) return;
+        setLiveIdentity(null);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user]);
+
+  const displayName = liveIdentity?.name || user?.name || user?.email || "Faculty";
+  const displayRefId = liveIdentity?.refId || user?.refId || "N/A";
   const initials = displayName
     .split(/[\s.@_-]+/)
     .filter(Boolean)
@@ -40,6 +85,10 @@ export default function Layout() {
     { name: "Modules", href: "/modules", icon: Files },
     { name: "Schedule", href: "/schedule", icon: CalendarDays },
     { name: "Profile", href: "/profile", icon: User },
+    { name: "Assigned Classes", href: "/assigned-classes", icon: ListChecks },
+    { name: "Teaching Units", href: "/teaching-units", icon: Calculator },
+    { name: "Research Outputs", href: "/research-outputs", icon: FlaskConical },
+    { name: "Authored Syllabi", href: "/authored-syllabi", icon: FileText },
   ];
 
   return (
@@ -60,7 +109,9 @@ export default function Layout() {
               <li>
                 <ul role="list" className="-mx-2 space-y-2">
                   {navigation.map((item) => {
-                    const isActive = location.pathname === item.href;
+                    const isActive = item.href === "/"
+                      ? location.pathname === "/"
+                      : location.pathname.startsWith(item.href);
                     return (
                       <li key={item.name}>
                         <Link
@@ -137,7 +188,9 @@ export default function Layout() {
               <nav className="flex flex-1 flex-col px-6 py-4">
                 <ul role="list" className="space-y-2">
                   {navigation.map((item) => {
-                    const isActive = location.pathname === item.href;
+                    const isActive = item.href === "/"
+                      ? location.pathname === "/"
+                      : location.pathname.startsWith(item.href);
                     return (
                       <li key={item.name}>
                         <Link

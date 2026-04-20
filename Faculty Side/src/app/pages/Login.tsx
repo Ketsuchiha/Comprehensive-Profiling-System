@@ -27,6 +27,11 @@ export default function Login() {
     }
 
     setIsLoading(false);
+    if (result.requiresPasswordChange) {
+      navigate('/profile?forceChangePassword=1');
+      return;
+    }
+
     navigate('/');
   };
 

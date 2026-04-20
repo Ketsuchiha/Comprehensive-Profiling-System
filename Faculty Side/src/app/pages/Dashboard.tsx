@@ -3,6 +3,7 @@ import { BookOpen, CalendarDays, GraduationCap, FlaskConical } from "lucide-reac
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { api } from "../utils/api";
+import { resolveFacultyId } from "../utils/facultySession";
 import { useAuth } from "../context/AuthContext";
 import buildingImage from "../../assets/b65a68daf197ee46f7b02d7da02ee101a668ac79.png";
 
@@ -38,7 +39,7 @@ export default function Dashboard() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!user?.refId) {
+    if (!user) {
       setLoading(false);
       setError("No faculty ID found for this session.");
       return;
@@ -48,10 +49,11 @@ export default function Dashboard() {
     setLoading(true);
     setError("");
 
-    Promise.all([
-      api.get<FacultyDashboardResponse>(`/faculty/${encodeURIComponent(user.refId)}/dashboard`),
-      api.get<EventRecord[]>("/events").catch(() => []),
-    ])
+    resolveFacultyId(user)
+      .then((facultyId) => Promise.all([
+        api.get<FacultyDashboardResponse>(`/faculty/${encodeURIComponent(facultyId)}/dashboard`),
+        api.get<EventRecord[]>("/events").catch(() => []),
+      ]))
       .then(([dashboardData, eventsData]) => {
         if (!isMounted) return;
         setDashboard(dashboardData);
@@ -69,7 +71,7 @@ export default function Dashboard() {
     return () => {
       isMounted = false;
     };
-  }, [user?.refId]);
+  }, [user]);
 
   const displayName = useMemo(() => {
     if (!dashboard?.faculty) return user?.name || "Faculty";

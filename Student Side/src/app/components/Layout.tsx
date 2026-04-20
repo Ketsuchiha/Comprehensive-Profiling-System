@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
-import logoImage from "../../assets/70c26a9cf9f6ef2d16948997d7c954b67149d16d.png";
+import logoImage from "../../assets/ccs-logo.png";
 import buildingImage from "../../assets/b65a68daf197ee46f7b02d7da02ee101a668ac79.png";
 
 export default function Layout() {

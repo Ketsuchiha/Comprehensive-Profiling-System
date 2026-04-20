@@ -12,7 +12,7 @@ interface User {
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
-  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  login: (email: string, password: string) => Promise<{ success: boolean; error?: string; requiresPasswordChange?: boolean }>;
   logout: () => void;
 }
 
@@ -32,10 +32,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   });
 
-  const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
+  const login = async (email: string, password: string): Promise<{ success: boolean; error?: string; requiresPasswordChange?: boolean }> => {
     try {
       const normalizedEmail = email.trim().toLowerCase();
-      const data = await api.post<{ user: { user_id: number; user_type: string; username: string; ref_id: string; display_name?: string } }>(
+      const data = await api.post<{ user: { user_id: number; user_type: string; username: string; ref_id: string; display_name?: string }; requires_password_change?: boolean }>(
         '/auth/login',
         { username: normalizedEmail, password }
       );
@@ -53,7 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       };
       setUser(loggedInUser);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(loggedInUser));
-      return { success: true };
+      return { success: true, requiresPasswordChange: Boolean(data.requires_password_change) };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : 'Login failed' };
     }

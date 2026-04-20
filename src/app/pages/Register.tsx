@@ -59,7 +59,7 @@ export function Register() {
           <div className="flex justify-center mb-4">
             <img src={logoImage} alt="CCS Logo" className="w-24 h-24" />
           </div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">CCS Admin Dashboard</h1>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">CCS Dean Dashboard</h1>
           <p className="text-gray-600">Comprehensive Profiling System</p>
         </div>
 

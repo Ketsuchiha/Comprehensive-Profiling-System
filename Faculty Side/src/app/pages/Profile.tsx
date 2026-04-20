@@ -1,9 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
-import { Mail, Phone, MapPin, Briefcase, Award, UserRound } from "lucide-react";
+import { useLocation, useNavigate } from "react-router";
+import { Mail, Phone, MapPin, Briefcase, Award, UserRound, KeyRound, Eye, EyeOff } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { api } from "../utils/api";
+import { resolveFacultyId } from "../utils/facultySession";
 import { useAuth } from "../context/AuthContext";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog";
 
 type FacultyEducation = {
   edu_id: number;
@@ -81,12 +91,25 @@ const fallbackProfilePhoto =
 
 export default function Profile() {
   const { user } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [faculty, setFaculty] = useState<FacultyRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
+  const [savingPassword, setSavingPassword] = useState(false);
+  const [passwordStatus, setPasswordStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   useEffect(() => {
-    if (!user?.refId) {
+    if (!user) {
       setLoading(false);
       setError("No faculty ID found for this session.");
       return;
@@ -96,11 +119,18 @@ export default function Profile() {
     setLoading(true);
     setError("");
 
-    api
-      .get<FacultyRecord>(`/faculty/${encodeURIComponent(user.refId)}`)
+    resolveFacultyId(user)
+      .then((facultyId) => api.get<FacultyRecord>(`/faculty/${encodeURIComponent(facultyId)}`))
       .then((data) => {
         if (!isMounted) return;
-        setFaculty(data);
+        setFaculty({
+          ...data,
+          education: Array.isArray(data.education) ? data.education : [],
+          load: Array.isArray(data.load) ? data.load : [],
+          evaluations: Array.isArray(data.evaluations) ? data.evaluations : [],
+          research: Array.isArray(data.research) ? data.research : [],
+          certifications: Array.isArray(data.certifications) ? data.certifications : [],
+        });
       })
       .catch((err) => {
         if (!isMounted) return;
@@ -114,12 +144,95 @@ export default function Profile() {
     return () => {
       isMounted = false;
     };
-  }, [user?.refId]);
+  }, [user]);
 
   const fullName = useMemo(() => {
     if (!faculty) return user?.name || "Faculty";
     return [faculty.first_name, faculty.middle_name, faculty.last_name].filter(Boolean).join(" ");
   }, [faculty, user?.name]);
+
+  const openPasswordModal = () => {
+    setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+    setPasswordStatus(null);
+    setShowCurrentPassword(false);
+    setShowNewPassword(false);
+    setShowConfirmPassword(false);
+    setIsPasswordModalOpen(true);
+  };
+
+  const handlePasswordModalOpenChange = (open: boolean) => {
+    setIsPasswordModalOpen(open);
+    if (!open) {
+      setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      setShowCurrentPassword(false);
+      setShowNewPassword(false);
+      setShowConfirmPassword(false);
+      if (passwordStatus?.type === "error") {
+        setPasswordStatus(null);
+      }
+    }
+  };
+
+  const handleChangePassword = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const refId = user?.refId || faculty?.faculty_id;
+    if (!refId) {
+      setPasswordStatus({ type: "error", message: "No faculty ID found for this account." });
+      return;
+    }
+
+    if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword) {
+      setPasswordStatus({ type: "error", message: "Please complete all password fields." });
+      return;
+    }
+
+    if (passwordForm.newPassword.length < 8) {
+      setPasswordStatus({ type: "error", message: "New password must be at least 8 characters long." });
+      return;
+    }
+
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setPasswordStatus({ type: "error", message: "New password and confirmation do not match." });
+      return;
+    }
+
+    setSavingPassword(true);
+    setPasswordStatus(null);
+
+    try {
+      await api.post<{ message: string }>("/auth/change-password", {
+        ref_id: refId,
+        user_type: "Faculty",
+        current_password: passwordForm.currentPassword,
+        new_password: passwordForm.newPassword,
+      });
+
+      setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      setShowCurrentPassword(false);
+      setShowNewPassword(false);
+      setShowConfirmPassword(false);
+      setPasswordStatus({ type: "success", message: "Password changed successfully." });
+      setIsPasswordModalOpen(false);
+    } catch (err) {
+      setPasswordStatus({
+        type: "error",
+        message: err instanceof Error ? err.message : "Failed to change password.",
+      });
+    } finally {
+      setSavingPassword(false);
+    }
+  };
+
+  useEffect(() => {
+    if (loading || !faculty) return;
+
+    const params = new URLSearchParams(location.search);
+    if (params.get("forceChangePassword") !== "1") return;
+
+    openPasswordModal();
+    navigate(location.pathname, { replace: true });
+  }, [loading, faculty, location.pathname, location.search, navigate]);
 
   if (loading) {
     return (
@@ -432,8 +545,131 @@ export default function Profile() {
               faculty_load, faculty_evaluation, faculty_research, and faculty_expertise_certifications.
             </p>
           </div>
+
+          <div className="mt-4 rounded-lg border border-indigo-100 bg-indigo-50 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="flex items-center gap-2 text-xs uppercase tracking-wide text-indigo-700">
+                <KeyRound className="h-3 w-3" /> Security
+              </p>
+              <button
+                type="button"
+                onClick={openPasswordModal}
+                className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+              >
+                <KeyRound className="h-4 w-4" />
+                Change Password
+              </button>
+            </div>
+            {passwordStatus?.type === "success" && (
+              <p className="mt-3 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
+                {passwordStatus.message}
+              </p>
+            )}
+          </div>
         </CardContent>
       </Card>
+
+      <Dialog open={isPasswordModalOpen} onOpenChange={handlePasswordModalOpenChange}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Change Password</DialogTitle>
+            <DialogDescription>
+              If you logged in using a temporary password, set your permanent password now.
+            </DialogDescription>
+          </DialogHeader>
+
+          {passwordStatus?.type === "error" && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {passwordStatus.message}
+            </div>
+          )}
+
+          <form onSubmit={handleChangePassword} className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-xs uppercase tracking-wide font-medium text-gray-500">Current Password</label>
+              <div className="relative">
+                <input
+                  type={showCurrentPassword ? "text" : "password"}
+                  value={passwordForm.currentPassword}
+                  onChange={(event) => setPasswordForm((previous) => ({ ...previous, currentPassword: event.target.value }))}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 pr-10 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                  placeholder="Enter current password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowCurrentPassword((previous) => !previous)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                  aria-label={showCurrentPassword ? "Hide current password" : "Show current password"}
+                >
+                  {showCurrentPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-xs uppercase tracking-wide font-medium text-gray-500">New Password</label>
+                <div className="relative">
+                  <input
+                    type={showNewPassword ? "text" : "password"}
+                    value={passwordForm.newPassword}
+                    onChange={(event) => setPasswordForm((previous) => ({ ...previous, newPassword: event.target.value }))}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 pr-10 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                    placeholder="At least 8 characters"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword((previous) => !previous)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                    aria-label={showNewPassword ? "Hide new password" : "Show new password"}
+                  >
+                    {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs uppercase tracking-wide font-medium text-gray-500">Confirm New Password</label>
+                <div className="relative">
+                  <input
+                    type={showConfirmPassword ? "text" : "password"}
+                    value={passwordForm.confirmPassword}
+                    onChange={(event) => setPasswordForm((previous) => ({ ...previous, confirmPassword: event.target.value }))}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 pr-10 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                    placeholder="Repeat new password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword((previous) => !previous)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                    aria-label={showConfirmPassword ? "Hide confirm password" : "Show confirm password"}
+                  >
+                    {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <button
+                type="button"
+                onClick={() => setIsPasswordModalOpen(false)}
+                disabled={savingPassword}
+                className="inline-flex items-center justify-center rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={savingPassword}
+                className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {savingPassword ? "Changing Password..." : "Confirm Password Change"}
+              </button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

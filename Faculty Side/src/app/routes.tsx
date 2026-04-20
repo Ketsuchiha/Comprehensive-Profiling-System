@@ -7,6 +7,10 @@ import Login from "./pages/Login";
 import Subjects from "./pages/Subjects";
 import Modules from "./pages/Modules";
 import Schedule from "./pages/Schedule";
+import AssignedClasses from "./pages/AssignedClasses";
+import TeachingUnits from "./pages/TeachingUnits";
+import ResearchOutputs from "./pages/ResearchOutputs";
+import AuthoredSyllabi from "./pages/AuthoredSyllabi";
 
 export const router = createBrowserRouter([
   {
@@ -26,6 +30,10 @@ export const router = createBrowserRouter([
       { path: "subjects", Component: Subjects },
       { path: "modules", Component: Modules },
       { path: "schedule", Component: Schedule },
+      { path: "assigned-classes", Component: AssignedClasses },
+      { path: "teaching-units", Component: TeachingUnits },
+      { path: "research-outputs", Component: ResearchOutputs },
+      { path: "authored-syllabi", Component: AuthoredSyllabi },
     ],
   },
 ]);

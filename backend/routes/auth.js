@@ -58,6 +58,43 @@ function generateStudentTempPasswords(student) {
   ]);
 }
 
+function generateFacultyTempPasswords(faculty) {
+  const birthDate = formatDateAsLocalYYYYMMDD(faculty && faculty.birth_date);
+  const middleInitial = (faculty && typeof faculty.middle_name === 'string' && faculty.middle_name.trim())
+    ? faculty.middle_name.trim().charAt(0).toUpperCase()
+    : 'X';
+  const lastInitial = (faculty && typeof faculty.last_name === 'string' && faculty.last_name.trim())
+    ? faculty.last_name.trim().charAt(0).toUpperCase()
+    : 'X';
+
+  return new Set([
+    `${lastInitial}${birthDate}`,
+    `${middleInitial}${birthDate}`,
+  ]);
+}
+
+async function getTempPasswordsForUser(userType, refId) {
+  if (userType === 'Student') {
+    const [studentRows] = await pool.query(
+      'SELECT birth_date, middle_name, last_name FROM students WHERE student_id = ? LIMIT 1',
+      [refId]
+    );
+    if (studentRows.length === 0) return new Set();
+    return generateStudentTempPasswords(studentRows[0]);
+  }
+
+  if (userType === 'Faculty') {
+    const [facultyRows] = await pool.query(
+      'SELECT birth_date, middle_name, last_name FROM faculty WHERE faculty_id = ? LIMIT 1',
+      [refId]
+    );
+    if (facultyRows.length === 0) return new Set();
+    return generateFacultyTempPasswords(facultyRows[0]);
+  }
+
+  return new Set();
+}
+
 function isStrongEnoughPassword(password) {
   return typeof password === 'string' && password.length >= 8;
 }
@@ -82,22 +119,17 @@ router.post('/login', async (req, res) => {
       return res.status(403).json({ error: 'Account is deactivated' });
     }
 
-    let isMatch = await bcrypt.compare(password, user.password_hash);
-    if (!isMatch && user.user_type === 'Student') {
-      const [studentRows] = await pool.query(
-        'SELECT birth_date, middle_name, last_name FROM students WHERE student_id = ? LIMIT 1',
-        [user.ref_id]
-      );
+    const isFirstLogin = !user.last_login;
+    const validTempPasswords = await getTempPasswordsForUser(user.user_type, user.ref_id);
+    const tempPasswordUsed = validTempPasswords.has(password);
 
-      if (studentRows.length > 0) {
-        const validTempPasswords = generateStudentTempPasswords(studentRows[0]);
-        if (validTempPasswords.has(password)) {
-          const salt = await bcrypt.genSalt(10);
-          const password_hash = await bcrypt.hash(password, salt);
-          await pool.query('UPDATE users SET password_hash = ? WHERE user_id = ?', [password_hash, user.user_id]);
-          isMatch = true;
-        }
-      }
+    let isMatch = await bcrypt.compare(password, user.password_hash);
+    if (!isMatch && isFirstLogin && tempPasswordUsed) {
+      // Legacy-first-login support when old accounts were not yet hashed to the temp password format.
+      const salt = await bcrypt.genSalt(10);
+      const password_hash = await bcrypt.hash(password, salt);
+      await pool.query('UPDATE users SET password_hash = ? WHERE user_id = ?', [password_hash, user.user_id]);
+      isMatch = true;
     }
 
     if (!isMatch) {
@@ -140,6 +172,7 @@ router.post('/login', async (req, res) => {
         ...userInfo,
         display_name: displayName,
       },
+      requires_password_change: Boolean(tempPasswordUsed && isFirstLogin),
     });
   } catch (err) {
     if (isDatabaseConnectionError(err)) {
@@ -237,17 +270,9 @@ router.post('/change-password', async (req, res) => {
 
     let currentPasswordMatches = await bcrypt.compare(current_password, user.password_hash);
 
-    // Keep support for first-login student temp passwords, then promote to hashed password.
-    if (!currentPasswordMatches && user.user_type === 'Student') {
-      const [studentRows] = await pool.query(
-        'SELECT birth_date, middle_name, last_name FROM students WHERE student_id = ? LIMIT 1',
-        [user.ref_id]
-      );
-
-      if (studentRows.length > 0) {
-        const validTempPasswords = generateStudentTempPasswords(studentRows[0]);
-        currentPasswordMatches = validTempPasswords.has(current_password);
-      }
+    if (!currentPasswordMatches && (user.user_type === 'Student' || user.user_type === 'Faculty')) {
+      const validTempPasswords = await getTempPasswordsForUser(user.user_type, user.ref_id);
+      currentPasswordMatches = validTempPasswords.has(current_password);
     }
 
     if (!currentPasswordMatches) {
