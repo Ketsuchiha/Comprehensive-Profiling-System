@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS `curriculum_subjects` (
 -- --------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `students` (
   `student_id` varchar(20) NOT NULL,
+  `section` varchar(20) DEFAULT NULL,
   `first_name` varchar(50) NOT NULL,
   `middle_name` varchar(50) DEFAULT NULL,
   `last_name` varchar(50) NOT NULL,
@@ -90,7 +91,8 @@ CREATE TABLE IF NOT EXISTS `students` (
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`student_id`),
-  UNIQUE KEY `email` (`email`)
+  UNIQUE KEY `email` (`email`),
+  KEY `idx_students_section` (`section`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------

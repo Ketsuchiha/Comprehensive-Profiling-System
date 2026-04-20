@@ -226,6 +226,7 @@ async function validateStudentCourseAssignments({
 
 let hasSkillsColumnCache = null;
 let hasPasswordColumnCache = null;
+let hasSectionColumnCache = null;
 let hasViolationsTableCache = null;
 
 async function hasStudentSkillsColumn() {
@@ -248,6 +249,28 @@ async function hasStudentSkillsColumn() {
   }
 
   return hasSkillsColumnCache;
+}
+
+async function hasStudentSectionColumn() {
+  if (typeof hasSectionColumnCache === 'boolean') {
+    return hasSectionColumnCache;
+  }
+
+  try {
+    const [rows] = await pool.query(
+      `SELECT 1
+       FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'students'
+         AND COLUMN_NAME = 'section'
+       LIMIT 1`
+    );
+    hasSectionColumnCache = rows.length > 0;
+  } catch {
+    hasSectionColumnCache = false;
+  }
+
+  return hasSectionColumnCache;
 }
 
 async function hasStudentPasswordColumn() {
@@ -333,7 +356,7 @@ router.get('/', async (req, res) => {
 
     if (!pagination) {
       const [rows] = await pool.query(
-        `SELECT s.*, sa.program, sa.year_level, sa.section, sa.enrollment_status
+        `SELECT s.*, sa.program, sa.year_level, COALESCE(NULLIF(s.section, ''), sa.section) AS section, sa.enrollment_status
          FROM students s
          LEFT JOIN student_academic sa ON s.student_id = sa.student_id
          ${whereClause}
@@ -352,7 +375,7 @@ router.get('/', async (req, res) => {
     );
 
     const [rows] = await pool.query(
-      `SELECT s.*, sa.program, sa.year_level, sa.section, sa.enrollment_status
+      `SELECT s.*, sa.program, sa.year_level, COALESCE(NULLIF(s.section, ''), sa.section) AS section, sa.enrollment_status
        FROM students s
        LEFT JOIN student_academic sa ON s.student_id = sa.student_id
        ${whereClause}
@@ -405,9 +428,17 @@ router.get('/:id', async (req, res) => {
       if (!isMissingTableError(coursesErr)) throw coursesErr;
     }
 
+    const resolvedSection = normalizeOptionalString(student[0].section);
+    const normalizedAcademic = academic.length > 0
+      ? {
+        ...academic[0],
+        section: normalizeOptionalString(academic[0].section) || resolvedSection,
+      }
+      : (resolvedSection ? { section: resolvedSection } : null);
+
     res.json({
       ...student[0],
-      academic: academic[0] || null,
+      academic: normalizedAcademic,
       documents,
       grades,
       internships,
@@ -425,7 +456,8 @@ router.get('/:id/dashboard', async (req, res) => {
     const { id } = req.params;
 
     const [student] = await pool.query(
-      `SELECT s.student_id, s.first_name, s.last_name, sa.program, sa.year_level, sa.section
+      `SELECT s.student_id, s.first_name, s.last_name, sa.program, sa.year_level,
+              COALESCE(NULLIF(s.section, ''), sa.section) AS section
        FROM students s
        LEFT JOIN student_academic sa ON s.student_id = sa.student_id
        WHERE s.student_id = ?`,
@@ -443,8 +475,9 @@ router.get('/:id/dashboard', async (req, res) => {
     const [scheduleSummary] = await pool.query(
       `SELECT COUNT(*) AS total_schedules
        FROM schedules sc
-       INNER JOIN student_academic sa ON sa.student_id = ?
-       WHERE sc.section = sa.section`,
+       INNER JOIN students s ON s.student_id = ?
+       LEFT JOIN student_academic sa ON sa.student_id = s.student_id
+       WHERE sc.section = COALESCE(NULLIF(s.section, ''), sa.section)`,
       [id]
     );
 
@@ -548,7 +581,7 @@ router.post('/', async (req, res) => {
       student_id, first_name, middle_name, last_name, birth_date, sex,
       civil_status, contact_number, email, address, emergency_contact,
       emergency_contact_num, profile_photo, nationality, religion, skills,
-      academic, course_codes
+      section, academic, course_codes
     } = req.body;
 
     if (course_codes !== undefined && !Array.isArray(course_codes)) {
@@ -592,9 +625,11 @@ router.post('/', async (req, res) => {
     }
 
     const generatedPassword = generateDefaultPassword(last_name, normalizedBirthDate);
+    const resolvedSection = normalizeOptionalString(section) || normalizeOptionalString(academic?.section);
 
     const includeSkillsColumn = await hasStudentSkillsColumn();
     const includePasswordColumn = await hasStudentPasswordColumn();
+    const includeSectionColumn = await hasStudentSectionColumn();
     const studentColumns = [
       'student_id',
       'first_name',
@@ -635,6 +670,11 @@ router.post('/', async (req, res) => {
       studentValues.push(normalizeOptionalString(skills));
     }
 
+    if (includeSectionColumn) {
+      studentColumns.push('section');
+      studentValues.push(resolvedSection);
+    }
+
     if (includePasswordColumn) {
       studentColumns.push('password');
       studentValues.push(generatedPassword);
@@ -667,13 +707,21 @@ router.post('/', async (req, res) => {
     }
 
     if (academic) {
+      const academicSection = normalizeOptionalString(academic.section) || resolvedSection;
       await pool.query(
         `INSERT INTO student_academic (student_id, program, major, track, year_level, section,
           admission_type, enrollment_status, scholarship_type, admission_date)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [student_id, academic.program || null, academic.major || null, academic.track || null,
-         academic.year_level || null, academic.section || null, academic.admission_type || null,
+         academic.year_level || null, academicSection, academic.admission_type || null,
          academic.enrollment_status || null, academic.scholarship_type || null, academic.admission_date || null]
+      );
+    } else if (resolvedSection) {
+      await pool.query(
+        `INSERT INTO student_academic (student_id, section)
+         VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE section = VALUES(section)`,
+        [student_id, resolvedSection]
       );
     }
 
@@ -763,7 +811,7 @@ router.put('/:id', async (req, res) => {
     const {
       first_name, middle_name, last_name, birth_date, sex, civil_status,
       contact_number, email, address, emergency_contact, emergency_contact_num,
-      profile_photo, nationality, religion, skills
+      profile_photo, nationality, religion, skills, section
     } = req.body;
 
     const blankRequiredOnUpdate = [];
@@ -789,6 +837,7 @@ router.put('/:id', async (req, res) => {
     }
 
     const includeSkillsColumn = await hasStudentSkillsColumn();
+    const includeSectionColumn = await hasStudentSectionColumn();
     const updateClauses = [
       'first_name = COALESCE(?, first_name)',
       'middle_name = COALESCE(?, middle_name)',
@@ -827,6 +876,11 @@ router.put('/:id', async (req, res) => {
       updateValues.push(typeof skills === 'string' ? skills.trim() : skills);
     }
 
+    if (includeSectionColumn) {
+      updateClauses.push('section = COALESCE(?, section)');
+      updateValues.push(typeof section === 'string' ? section.trim() : section);
+    }
+
     updateClauses.push('updated_at = NOW()');
     updateValues.push(id);
 
@@ -836,6 +890,18 @@ router.put('/:id', async (req, res) => {
     );
 
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Student not found' });
+
+    if (section !== undefined) {
+      const normalizedSection = normalizeOptionalString(section);
+      if (normalizedSection) {
+        await pool.query(
+          `INSERT INTO student_academic (student_id, section)
+           VALUES (?, ?)
+           ON DUPLICATE KEY UPDATE section = VALUES(section)`,
+          [id, normalizedSection]
+        );
+      }
+    }
 
     // Keep student portal login in sync when admin updates the student email.
     const [studentRows] = await pool.query(
@@ -888,8 +954,28 @@ router.delete('/:id', async (req, res) => {
 // GET /:id/academic
 router.get('/:id/academic', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM student_academic WHERE student_id = ?', [req.params.id]);
-    if (rows.length === 0) return res.status(404).json({ error: 'Academic record not found' });
+    const [rows] = await pool.query(
+      `SELECT
+         s.student_id,
+         sa.program,
+         sa.major,
+         sa.track,
+         sa.year_level,
+        COALESCE(NULLIF(s.section, ''), sa.section) AS section,
+         sa.admission_type,
+         sa.enrollment_status,
+         sa.scholarship_type,
+         sa.admission_date,
+         s.created_at AS student_created_at,
+         DATE_FORMAT(s.created_at, '%Y-%m-%d') AS created_at_date,
+         DATE_FORMAT(s.created_at, '%Y-%m-%d') AS date_admitted
+       FROM students s
+       LEFT JOIN student_academic sa ON sa.student_id = s.student_id
+       WHERE s.student_id = ?
+       LIMIT 1`,
+      [req.params.id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'Student not found' });
     res.json(rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -922,6 +1008,14 @@ router.put('/:id/academic', async (req, res) => {
         [program, major, track, year_level, section, admission_type, enrollment_status, scholarship_type, admission_date, id]
       );
     }
+
+    if (await hasStudentSectionColumn()) {
+      await pool.query(
+        'UPDATE students SET section = COALESCE(?, section) WHERE student_id = ?',
+        [normalizeOptionalString(section), id]
+      );
+    }
+
     res.json({ message: 'Academic record updated successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1002,17 +1096,41 @@ router.delete('/grades/:gradeId', async (req, res) => {
 // GET /:id/schedules - Student class schedules based on section
 router.get('/:id/schedules', async (req, res) => {
   try {
+    const assignedCourseCodes = [];
+    try {
+      const [assignmentRows] = await pool.query(
+        'SELECT subject_code FROM student_course_assignments WHERE student_id = ?',
+        [req.params.id]
+      );
+      assignmentRows.forEach((row) => {
+        if (row && typeof row.subject_code === 'string' && row.subject_code.trim()) {
+          assignedCourseCodes.push(row.subject_code.trim().toUpperCase());
+        }
+      });
+    } catch (courseErr) {
+      if (!isMissingTableError(courseErr)) throw courseErr;
+    }
+
+    const uniqueAssignedCourses = Array.from(new Set(assignedCourseCodes));
+    const subjectFilterSql = uniqueAssignedCourses.length > 0
+      ? ` AND sc.subject_code IN (${uniqueAssignedCourses.map(() => '?').join(', ')})`
+      : '';
+
+    const params = [req.params.id, ...uniqueAssignedCourses];
+
     const [rows] = await pool.query(
       `SELECT sc.*, s.subject_name, f.first_name AS faculty_first_name, f.last_name AS faculty_last_name,
          r.room_name, r.building
-       FROM student_academic sa
-       INNER JOIN schedules sc ON sc.section = sa.section
+       FROM students st
+       LEFT JOIN student_academic sa ON sa.student_id = st.student_id
+       INNER JOIN schedules sc ON sc.section = COALESCE(NULLIF(st.section, ''), sa.section)
        LEFT JOIN subjects s ON sc.subject_code = s.subject_code
        LEFT JOIN faculty f ON sc.faculty_id = f.faculty_id
        LEFT JOIN rooms r ON sc.room_id = r.room_id
-       WHERE sa.student_id = ?
+       WHERE st.student_id = ?
+       ${subjectFilterSql}
        ORDER BY sc.day_of_week, sc.start_time`,
-      [req.params.id]
+      params
     );
     res.json(rows);
   } catch (err) {

@@ -53,6 +53,27 @@ async function ensureStudentSkillsColumn() {
   }
 }
 
+async function ensureStudentSectionColumn() {
+  try {
+    const [rows] = await pool.query(
+      `SELECT 1
+       FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'students'
+         AND COLUMN_NAME = 'section'
+       LIMIT 1`
+    );
+
+    if (rows.length === 0) {
+      await pool.query('ALTER TABLE students ADD COLUMN section varchar(20) DEFAULT NULL AFTER student_id');
+      await pool.query('ALTER TABLE students ADD KEY idx_students_section (section)');
+      console.log('Applied schema update: added students.section column');
+    }
+  } catch (err) {
+    console.warn(`Schema check skipped: ${err.message}`);
+  }
+}
+
 async function ensureFacultyAssignedSectionColumn() {
   try {
     const [rows] = await pool.query(
@@ -103,6 +124,7 @@ async function ensureStudentViolationsTable() {
 
 async function applySchemaUpdates() {
   await ensureStudentSkillsColumn();
+  await ensureStudentSectionColumn();
   await ensureFacultyAssignedSectionColumn();
   await ensureStudentViolationsTable();
 }
