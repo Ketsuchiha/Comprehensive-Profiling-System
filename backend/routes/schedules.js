@@ -94,7 +94,18 @@ router.get('/', async (req, res) => {
     if (!pagination) {
       const [rows] = await pool.query(
         `SELECT sc.*, s.subject_name, f.first_name AS faculty_first_name, f.last_name AS faculty_last_name,
-          r.room_name, r.building
+          r.room_name, r.building,
+          (
+            SELECT COUNT(DISTINCT sca.student_id)
+            FROM student_course_assignments sca
+            INNER JOIN students st2 ON st2.student_id = sca.student_id
+            LEFT JOIN student_academic sa2 ON sa2.student_id = st2.student_id
+            WHERE sca.subject_code = sc.subject_code
+              AND (
+                COALESCE(NULLIF(sc.section, ''), '__ALL__') = '__ALL__'
+                OR COALESCE(NULLIF(st2.section, ''), sa2.section) = sc.section
+              )
+          ) AS student_count
          FROM schedules sc
          LEFT JOIN subjects s ON sc.subject_code = s.subject_code
          LEFT JOIN faculty f ON sc.faculty_id = f.faculty_id
@@ -116,7 +127,18 @@ router.get('/', async (req, res) => {
 
     const [rows] = await pool.query(
       `SELECT sc.*, s.subject_name, f.first_name AS faculty_first_name, f.last_name AS faculty_last_name,
-        r.room_name, r.building
+        r.room_name, r.building,
+        (
+          SELECT COUNT(DISTINCT sca.student_id)
+          FROM student_course_assignments sca
+          INNER JOIN students st2 ON st2.student_id = sca.student_id
+          LEFT JOIN student_academic sa2 ON sa2.student_id = st2.student_id
+          WHERE sca.subject_code = sc.subject_code
+            AND (
+              COALESCE(NULLIF(sc.section, ''), '__ALL__') = '__ALL__'
+              OR COALESCE(NULLIF(st2.section, ''), sa2.section) = sc.section
+            )
+        ) AS student_count
        FROM schedules sc
        LEFT JOIN subjects s ON sc.subject_code = s.subject_code
        LEFT JOIN faculty f ON sc.faculty_id = f.faculty_id
@@ -151,7 +173,18 @@ router.get('/calendar', async (req, res) => {
       `SELECT sc.schedule_id, sc.subject_code, s.subject_name, sc.section,
               sc.day_of_week, sc.start_time, sc.end_time,
               f.first_name AS faculty_first_name, f.last_name AS faculty_last_name,
-              r.room_name
+              r.room_name,
+              (
+                SELECT COUNT(DISTINCT sca.student_id)
+                FROM student_course_assignments sca
+                INNER JOIN students st2 ON st2.student_id = sca.student_id
+                LEFT JOIN student_academic sa2 ON sa2.student_id = st2.student_id
+                WHERE sca.subject_code = sc.subject_code
+                  AND (
+                    COALESCE(NULLIF(sc.section, ''), '__ALL__') = '__ALL__'
+                    OR COALESCE(NULLIF(st2.section, ''), sa2.section) = sc.section
+                  )
+              ) AS student_count
        FROM schedules sc
        LEFT JOIN subjects s ON sc.subject_code = s.subject_code
        LEFT JOIN faculty f ON sc.faculty_id = f.faculty_id
@@ -169,7 +202,18 @@ router.get('/:id', async (req, res) => {
   try {
     const [rows] = await pool.query(
       `SELECT sc.*, s.subject_name, f.first_name AS faculty_first_name, f.last_name AS faculty_last_name,
-        r.room_name, r.building
+        r.room_name, r.building,
+        (
+          SELECT COUNT(DISTINCT sca.student_id)
+          FROM student_course_assignments sca
+          INNER JOIN students st2 ON st2.student_id = sca.student_id
+          LEFT JOIN student_academic sa2 ON sa2.student_id = st2.student_id
+          WHERE sca.subject_code = sc.subject_code
+            AND (
+              COALESCE(NULLIF(sc.section, ''), '__ALL__') = '__ALL__'
+              OR COALESCE(NULLIF(st2.section, ''), sa2.section) = sc.section
+            )
+        ) AS student_count
        FROM schedules sc
        LEFT JOIN subjects s ON sc.subject_code = s.subject_code
        LEFT JOIN faculty f ON sc.faculty_id = f.faculty_id
