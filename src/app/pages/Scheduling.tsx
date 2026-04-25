@@ -12,6 +12,7 @@ interface Schedule {
   timeStart: string;
   timeEnd: string;
   section: string;
+  studentCount: number;
 }
 
 interface FacultyOption {
@@ -125,6 +126,7 @@ export function Scheduling() {
         timeStart: s.start_time || '',
         timeEnd: s.end_time || '',
         section: s.section || '',
+        studentCount: Number(s.student_count || 0),
       })));
       setPagination({
         page: meta.page,
@@ -179,6 +181,7 @@ export function Scheduling() {
         timeStart: s.start_time || '',
         timeEnd: s.end_time || '',
         section: s.section || '',
+        studentCount: Number(s.student_count || 0),
       })));
     } catch (err) {
       console.error('Failed to fetch calendar schedules:', err);
@@ -287,6 +290,7 @@ export function Scheduling() {
         timeStart: "",
         timeEnd: "",
         section: "",
+        studentCount: 0,
       });
     } catch (err) {
       console.error('Failed to add schedule:', err);
@@ -561,14 +565,19 @@ export function Scheduling() {
                       key={`modal-selected-${schedule.id}`}
                       className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2"
                     >
-                      <div className="flex flex-wrap items-center gap-2 text-sm">
-                        <span className="rounded bg-orange-100 px-2 py-0.5 font-semibold text-orange-700">
-                          {schedule.timeStart} - {schedule.timeEnd}
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex flex-wrap items-center gap-2 text-sm">
+                          <span className="rounded bg-orange-100 px-2 py-0.5 font-semibold text-orange-700">
+                            {schedule.timeStart} - {schedule.timeEnd}
+                          </span>
+                          <span className="font-semibold text-gray-900">{schedule.courseCode}</span>
+                          {schedule.courseName && (
+                            <span className="text-gray-700">{schedule.courseName}</span>
+                          )}
+                        </div>
+                        <span className="shrink-0 rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-700">
+                          {schedule.studentCount} student{schedule.studentCount === 1 ? "" : "s"}
                         </span>
-                        <span className="font-semibold text-gray-900">{schedule.courseCode}</span>
-                        {schedule.courseName && (
-                          <span className="text-gray-700">{schedule.courseName}</span>
-                        )}
                       </div>
                       <div className="mt-1 flex flex-wrap gap-3 text-xs text-gray-600">
                         {schedule.section && <span>Section: {schedule.section}</span>}
