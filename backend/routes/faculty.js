@@ -899,12 +899,36 @@ router.delete('/evaluations/:evalId', async (req, res) => {
 // GET /:id/load
 router.get('/:id/load', async (req, res) => {
   try {
-    const [rows] = await pool.query(
-      `SELECT fl.*, s.subject_name FROM faculty_load fl
+    const { id } = req.params;
+    const [facultyLoadRows] = await pool.query(
+      `SELECT fl.*, s.subject_name, s.units AS subject_units
+       FROM faculty_load fl
        LEFT JOIN subjects s ON fl.subject_code = s.subject_code
-       WHERE fl.faculty_id = ?`, [req.params.id]
+       WHERE fl.faculty_id = ?
+       ORDER BY fl.academic_year DESC, fl.semester DESC, fl.subject_code`,
+      [id]
     );
-    res.json(rows);
+
+    if (facultyLoadRows.length > 0) {
+      return res.json(facultyLoadRows);
+    }
+
+    const [scheduleRows] = await pool.query(
+      `SELECT DISTINCT
+        sch.subject_code,
+        s.subject_name,
+        s.units AS subject_units,
+        sch.section,
+        sch.semester,
+        sch.academic_year
+       FROM schedules sch
+       LEFT JOIN subjects s ON sch.subject_code = s.subject_code
+       WHERE sch.faculty_id = ?
+       ORDER BY sch.academic_year DESC, sch.semester DESC, sch.subject_code`,
+      [id]
+    );
+
+    return res.json(scheduleRows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -926,8 +950,10 @@ router.get('/:id/modules', async (req, res) => {
 
     const loadFilterClause = subjectCodeFilter ? ' AND fl.subject_code = ?' : '';
     const loadParams = subjectCodeFilter ? [id, subjectCodeFilter] : [id];
+    const scheduleFilterClause = subjectCodeFilter ? ' AND sc.subject_code = ?' : '';
+    const scheduleParams = subjectCodeFilter ? [id, subjectCodeFilter] : [id];
 
-    const [assignedSubjects] = await pool.query(
+    const [loadAssignedSubjects] = await pool.query(
       `SELECT fl.load_id, fl.subject_code, s.subject_name, fl.section, fl.semester, fl.academic_year, fl.teaching_units
        FROM faculty_load fl
        LEFT JOIN subjects s ON fl.subject_code = s.subject_code
@@ -936,11 +962,29 @@ router.get('/:id/modules', async (req, res) => {
       loadParams
     );
 
-    if (subjectCodeFilter && assignedSubjects.length === 0) {
-      return res.status(404).json({
-        error: `Subject ${subjectCodeFilter} is not currently assigned to this faculty member.`,
-      });
-    }
+    const [scheduleAssignedSubjects] = await pool.query(
+      `SELECT NULL AS load_id, sc.subject_code, s.subject_name, sc.section, sc.semester, sc.academic_year, s.units AS teaching_units
+       FROM schedules sc
+       LEFT JOIN subjects s ON sc.subject_code = s.subject_code
+       WHERE sc.faculty_id = ?${scheduleFilterClause}
+       ORDER BY sc.academic_year DESC, sc.semester DESC, sc.subject_code`,
+      scheduleParams
+    );
+
+    const assignedMap = new Map();
+    [...loadAssignedSubjects, ...scheduleAssignedSubjects].forEach((row) => {
+      const subjectCode = row.subject_code ? String(row.subject_code) : '';
+      if (!subjectCode) return;
+      const key = `${subjectCode}|${row.section || ''}|${row.semester || ''}|${row.academic_year || ''}`;
+      if (!assignedMap.has(key)) {
+        assignedMap.set(key, row);
+      }
+    });
+
+    const assignedSubjects = Array.from(assignedMap.values());
+
+    // Do not hard-block module access when load records are missing.
+    // Faculty assignments can come from schedule rows and may lag in faculty_load.
 
     let modules = [];
     let syllabusTablesAvailable = true;
@@ -1043,7 +1087,7 @@ router.get('/:id/modules', async (req, res) => {
 router.get('/:id/schedules', async (req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT sc.*, s.subject_name, r.room_name, r.building
+      `SELECT sc.*, s.subject_name, s.units AS subject_units, r.room_name, r.building
        FROM schedules sc
        LEFT JOIN subjects s ON sc.subject_code = s.subject_code
        LEFT JOIN rooms r ON sc.room_id = r.room_id

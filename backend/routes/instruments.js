@@ -65,7 +65,10 @@ const INSTRUMENTS_UNION_QUERY = `
     f.first_name AS faculty_first_name,
     f.last_name AS faculty_last_name,
     sy.created_at,
-    sy.references_biblio AS file_url
+    sy.references_biblio AS file_url,
+    sy.academic_year,
+    sy.semester,
+    sy.faculty_id
   FROM syllabus sy
   LEFT JOIN subjects s ON sy.subject_code = s.subject_code
   LEFT JOIN faculty f ON sy.faculty_id = f.faculty_id
@@ -80,7 +83,10 @@ const INSTRUMENTS_UNION_QUERY = `
     f.first_name AS faculty_first_name,
     f.last_name AS faculty_last_name,
     l.created_at,
-    COALESCE(l.file_path, l.external_url) AS file_url
+    COALESCE(l.file_path, l.external_url) AS file_url,
+    sy.academic_year,
+    sy.semester,
+    sy.faculty_id
   FROM lessons l
   LEFT JOIN syllabus_topics st ON l.topic_id = st.topic_id
   LEFT JOIN syllabus sy ON st.syllabus_id = sy.syllabus_id
