@@ -11,6 +11,9 @@ interface Instrument {
   uploadDate: string;
   fileSize: string;
   fileUrl: string;
+  academicYear?: string;
+  semester?: string;
+  facultyId?: string;
 }
 
 interface PaginationMeta {
@@ -72,6 +75,9 @@ export function Instruments() {
     uploadDate: row.created_at ? String(row.created_at).split('T')[0] : '',
     fileSize: 'N/A',
     fileUrl: resolveFileUrl(row.file_url || row.fileUrl),
+    academicYear: row.academic_year || undefined,
+    semester: row.semester || undefined,
+    facultyId: row.faculty_id || undefined,
   });
 
   const applyClientPagination = (rows: Instrument[]) => {
@@ -529,8 +535,18 @@ export function Instruments() {
                           <span>{item.fileSize}</span>
                         </div>
                         <div>
-                          <span>Instructor: {item.instructor}</span>
+                          <span>Instructor: {item.instructor || 'N/A'}</span>
                         </div>
+                        {item.academicYear && (
+                          <div>
+                            <span>AY: {item.academicYear}</span>
+                          </div>
+                        )}
+                        {item.semester && (
+                          <div>
+                            <span>Sem: {item.semester}</span>
+                          </div>
+                        )}
                         <div>
                           {item.fileUrl ? (
                             <button
