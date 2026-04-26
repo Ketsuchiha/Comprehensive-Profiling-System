@@ -624,6 +624,7 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'A valid birth_date is required' });
     }
 
+    const normalizedStudentId = student_id.trim();
     const generatedPassword = generateDefaultPassword(last_name, normalizedBirthDate);
     const resolvedSection = normalizeOptionalString(section) || normalizeOptionalString(academic?.section);
 
@@ -648,7 +649,7 @@ router.post('/', async (req, res) => {
       'religion',
     ];
     const studentValues = [
-      student_id.trim(),
+      normalizedStudentId,
       first_name.trim(),
       normalizeOptionalString(middle_name),
       last_name.trim(),
@@ -687,7 +688,7 @@ router.post('/', async (req, res) => {
     );
 
     try {
-      const username = normalizeOptionalString(email, { toLower: true }) || student_id.trim();
+      const username = normalizeOptionalString(email, { toLower: true }) || normalizedStudentId;
       const salt = await bcrypt.genSalt(10);
       const password_hash = await bcrypt.hash(generatedPassword, salt);
 
@@ -699,10 +700,10 @@ router.post('/', async (req, res) => {
            username = VALUES(username),
            password_hash = VALUES(password_hash),
            is_active = 1`,
-        [student_id, username, password_hash]
+        [normalizedStudentId, username, password_hash]
       );
     } catch (userErr) {
-      await pool.query('DELETE FROM students WHERE student_id = ?', [student_id]);
+      await pool.query('DELETE FROM students WHERE student_id = ?', [normalizedStudentId]);
       throw new Error(`Student record rollback: failed to create user credentials (${userErr.message})`);
     }
 
@@ -712,7 +713,7 @@ router.post('/', async (req, res) => {
         `INSERT INTO student_academic (student_id, program, major, track, year_level, section,
           admission_type, enrollment_status, scholarship_type, admission_date)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [student_id, academic.program || null, academic.major || null, academic.track || null,
+        [normalizedStudentId, academic.program || null, academic.major || null, academic.track || null,
          academic.year_level || null, academicSection, academic.admission_type || null,
          academic.enrollment_status || null, academic.scholarship_type || null, academic.admission_date || null]
       );
@@ -721,13 +722,13 @@ router.post('/', async (req, res) => {
         `INSERT INTO student_academic (student_id, section)
          VALUES (?, ?)
          ON DUPLICATE KEY UPDATE section = VALUES(section)`,
-        [student_id, resolvedSection]
+        [normalizedStudentId, resolvedSection]
       );
     }
 
     if (normalizedCourseCodes.length > 0) {
       try {
-        const values = normalizedCourseCodes.map((subjectCode) => [student_id, subjectCode]);
+        const values = normalizedCourseCodes.map((subjectCode) => [normalizedStudentId, subjectCode]);
         await pool.query(
           'INSERT INTO student_course_assignments (student_id, subject_code) VALUES ? ON DUPLICATE KEY UPDATE subject_code = VALUES(subject_code)',
           [values]
@@ -737,7 +738,13 @@ router.post('/', async (req, res) => {
       }
     }
 
-    res.status(201).json({ message: 'Student created successfully', student_id });
+    const loginUsername = normalizeOptionalString(email, { toLower: true }) || normalizedStudentId;
+    res.status(201).json({
+      message: 'Student created successfully',
+      student_id: normalizedStudentId,
+      login_username: loginUsername,
+      temp_password: generatedPassword,
+    });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') {
       return res.status(409).json({ error: 'Student ID or email already exists' });
@@ -939,6 +946,7 @@ router.delete('/:id', async (req, res) => {
     if (await hasStudentViolationsTable()) {
       await pool.query('DELETE FROM student_violations WHERE student_id = ?', [id]);
     }
+    await pool.query("DELETE FROM users WHERE ref_id = ? AND user_type = 'Student'", [id]);
     await pool.query('DELETE FROM student_academic WHERE student_id = ?', [id]);
     const [result] = await pool.query('DELETE FROM students WHERE student_id = ?', [id]);
 

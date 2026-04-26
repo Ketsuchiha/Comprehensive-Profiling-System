@@ -117,6 +117,10 @@ export default function Login() {
             <p className="text-sm text-gray-600">Use your faculty email and temporary password provided by the admin.</p>
           </div>
         </div>
+
+        <footer className="mt-6 text-center text-sm text-gray-500">
+          All rights reserved 2026
+        </footer>
       </div>
     </div>
   );

@@ -94,7 +94,14 @@ export function Layout() {
 
       {/* Main Content */}
       <main className="ml-64 h-screen overflow-y-auto">
-        <Outlet />
+        <div className="flex min-h-full flex-col">
+          <div className="flex-1">
+            <Outlet />
+          </div>
+          <footer className="border-t border-gray-200 bg-white px-6 py-4 text-center text-sm text-gray-500">
+            All rights reserved 2026
+          </footer>
+        </div>
       </main>
     </div>
   );

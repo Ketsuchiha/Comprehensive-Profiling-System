@@ -36,6 +36,17 @@ function normalizeStatus(value) {
   return allowed.has(normalized) ? normalized : null;
 }
 
+function violationSelectClause() {
+  return `SELECT sv.*,
+                 s.first_name AS student_first_name,
+                 s.last_name AS student_last_name,
+                 f.faculty_id AS reported_by_id,
+                 COALESCE(CONCAT_WS(' ', f.first_name, f.middle_name, f.last_name), sv.reported_by) AS reported_by_name
+          FROM student_violations sv
+          LEFT JOIN students s ON s.student_id = sv.student_id
+          LEFT JOIN faculty f ON f.faculty_id = sv.reported_by`;
+}
+
 // GET / - List violations (optional filters: student_id, status)
 router.get('/', async (req, res) => {
   try {
@@ -57,10 +68,7 @@ router.get('/', async (req, res) => {
       params.push(normalizedStatus);
     }
 
-    let sql =
-      `SELECT sv.*, s.first_name, s.last_name
-       FROM student_violations sv
-       LEFT JOIN students s ON s.student_id = sv.student_id`;
+    let sql = violationSelectClause();
 
     if (clauses.length > 0) {
       sql += ` WHERE ${clauses.join(' AND ')}`;
@@ -85,10 +93,16 @@ router.get('/', async (req, res) => {
 router.get('/student/:studentId', async (req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT *
-       FROM student_violations
-       WHERE student_id = ?
-       ORDER BY incident_date DESC, violation_id DESC`,
+      `SELECT sv.*,
+              s.first_name AS student_first_name,
+              s.last_name AS student_last_name,
+              f.faculty_id AS reported_by_id,
+              COALESCE(CONCAT_WS(' ', f.first_name, f.middle_name, f.last_name), sv.reported_by) AS reported_by_name
+       FROM student_violations sv
+       LEFT JOIN students s ON s.student_id = sv.student_id
+       LEFT JOIN faculty f ON f.faculty_id = sv.reported_by
+       WHERE sv.student_id = ?
+       ORDER BY sv.incident_date DESC, sv.violation_id DESC`,
       [req.params.studentId]
     );
     res.json(rows);
@@ -100,7 +114,10 @@ router.get('/student/:studentId', async (req, res) => {
 // GET /:id - Get single violation
 router.get('/:id', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM student_violations WHERE violation_id = ?', [req.params.id]);
+    const [rows] = await pool.query(
+      `${violationSelectClause()} WHERE sv.violation_id = ? LIMIT 1`,
+      [req.params.id]
+    );
     if (rows.length === 0) return res.status(404).json({ error: 'Violation not found' });
     res.json(rows[0]);
   } catch (err) {
@@ -142,6 +159,8 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'status must be Active, Resolved, or Dismissed' });
     }
 
+    const normalizedReportedBy = normalizeOptionalText(reported_by);
+
     const [result] = await pool.query(
       `INSERT INTO student_violations
         (student_id, violation_type, subject_context, description, severity, status, incident_date, reported_by)
@@ -154,7 +173,7 @@ router.post('/', async (req, res) => {
         normalizedSeverity,
         normalizedStatus,
         normalizedIncidentDate,
-        normalizeOptionalText(reported_by),
+        normalizedReportedBy,
       ]
     );
 
@@ -198,6 +217,8 @@ router.put('/:id', async (req, res) => {
       return res.status(400).json({ error: 'incident_date must be in YYYY-MM-DD format' });
     }
 
+    const normalizedReportedBy = reported_by === undefined ? undefined : normalizeOptionalText(reported_by);
+
     const [result] = await pool.query(
       `UPDATE student_violations
        SET violation_type = COALESCE(?, violation_type),
@@ -216,7 +237,7 @@ router.put('/:id', async (req, res) => {
         normalizedSeverity,
         normalizedStatus,
         normalizedIncidentDate,
-        typeof reported_by === 'string' ? reported_by.trim() : reported_by,
+        normalizedReportedBy,
         id,
       ]
     );

@@ -173,6 +173,10 @@ export function Register() {
             </p>
           </div>
         </div>
+
+        <footer className="mt-6 text-center text-sm text-gray-500">
+          All rights reserved 2026
+        </footer>
       </div>
     </div>
   );

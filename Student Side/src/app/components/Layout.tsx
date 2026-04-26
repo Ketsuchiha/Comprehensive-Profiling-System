@@ -175,14 +175,19 @@ export default function Layout() {
 
       {/* Main content */}
       <main className="lg:pl-64">
-        <div className="relative px-4 py-6 sm:px-6 lg:px-8">
+        <div className="relative flex min-h-screen flex-col px-4 py-6 sm:px-6 lg:px-8">
           <img
             src={buildingImage}
             alt=""
             aria-hidden="true"
             className="pointer-events-none absolute inset-0 -z-10 h-full w-full object-cover opacity-[0.04]"
           />
-          <Outlet />
+          <div className="flex-1">
+            <Outlet />
+          </div>
+          <footer className="mt-8 border-t border-gray-200 pt-4 text-center text-sm text-gray-500">
+            All rights reserved 2026
+          </footer>
         </div>
       </main>
     </div>
