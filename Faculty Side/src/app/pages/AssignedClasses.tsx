@@ -9,12 +9,19 @@ type Schedule = {
   schedule_id: number;
   subject_code: string | null;
   subject_name: string | null;
+  subject_units: number | null;
   section: string | null;
   day_of_week: string | null;
   start_time: string | null;
   end_time: string | null;
   room_name: string | null;
   building: string | null;
+};
+
+type FacultyLoadRow = {
+  subject_code: string | null;
+  subject_units: number | null;
+  teaching_units: number | null;
 };
 
 type FacultyEmployment = {
@@ -24,6 +31,7 @@ type FacultyEmployment = {
 export default function AssignedClasses() {
   const { user } = useAuth();
   const [items, setItems] = useState<Schedule[]>([]);
+  const [loadItems, setLoadItems] = useState<FacultyLoadRow[]>([]);
   const [assignedSection, setAssignedSection] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -40,16 +48,21 @@ export default function AssignedClasses() {
     setLoading(true);
     setError("");
 
-    resolveFacultyId(user)
+    const directRefId = (user.refId || "").trim();
+    const facultyIdPromise = directRefId ? Promise.resolve(directRefId) : resolveFacultyId(user);
+
+    facultyIdPromise
       .then(async (facultyId) => {
-        const [scheduleRows, employment] = await Promise.all([
+        const [scheduleRows, employment, loadRows] = await Promise.all([
           api.get<Schedule[]>(`/faculty/${encodeURIComponent(facultyId)}/schedules`).catch(() => []),
           api.get<FacultyEmployment>(`/faculty/${encodeURIComponent(facultyId)}/employment`).catch(() => null),
+          api.get<FacultyLoadRow[]>(`/faculty/${encodeURIComponent(facultyId)}/load`).catch(() => []),
         ]);
 
         if (!isMounted) return;
         setItems(scheduleRows);
         setAssignedSection(employment?.assigned_section || null);
+        setLoadItems(loadRows);
       })
       .catch((err) => {
         if (!isMounted) return;
@@ -66,6 +79,34 @@ export default function AssignedClasses() {
   }, [user]);
 
   const classCount = useMemo(() => items.length, [items]);
+
+  const totalUnits = useMemo(() => {
+    const loadUnits = loadItems.reduce((sum, row) => sum + Number(row.teaching_units || 0), 0);
+    if (loadUnits > 0) return loadUnits;
+    return items.reduce((sum, row) => sum + Number(row.subject_units || 0), 0);
+  }, [items, loadItems]);
+
+  const maxUnits = useMemo(() => {
+    const subjectMap = new Map<string, number>();
+
+    loadItems.forEach((row) => {
+      if (!row.subject_code) return;
+      subjectMap.set(String(row.subject_code), Number(row.subject_units || 0));
+    });
+
+    if (subjectMap.size === 0) {
+      items.forEach((row) => {
+        if (!row.subject_code) return;
+        subjectMap.set(String(row.subject_code), Number(row.subject_units || 0));
+      });
+    }
+
+    let sum = 0;
+    subjectMap.forEach((units) => {
+      sum += units;
+    });
+    return sum;
+  }, [items, loadItems]);
 
   return (
     <div className="space-y-6">
@@ -86,8 +127,9 @@ export default function AssignedClasses() {
 
         <Card>
           <CardContent className="pt-6">
-            <p className="text-sm text-gray-600">Default Assigned Section</p>
-            <p className="mt-2 text-3xl font-semibold text-amber-600">{loading ? "..." : assignedSection || "N/A"}</p>
+            <p className="text-sm text-gray-600">Total Units</p>
+            <p className="mt-2 text-3xl font-semibold text-amber-600">{loading ? "..." : totalUnits}</p>
+            <p className="mt-1 text-xs text-gray-500">Max units based on assigned subjects: {loading ? "..." : maxUnits}</p>
           </CardContent>
         </Card>
       </div>
@@ -108,6 +150,7 @@ export default function AssignedClasses() {
                   <tr>
                     <th className="px-3 py-2">Subject Code</th>
                     <th className="px-3 py-2">Subject Name</th>
+                    <th className="px-3 py-2">Units</th>
                     <th className="px-3 py-2">Section</th>
                     <th className="px-3 py-2">Day & Time</th>
                     <th className="px-3 py-2">Room Location</th>
@@ -118,6 +161,7 @@ export default function AssignedClasses() {
                     <tr key={row.schedule_id} className="border-t border-gray-100">
                       <td className="px-3 py-2 font-medium">{row.subject_code || "-"}</td>
                       <td className="px-3 py-2">{row.subject_name || "-"}</td>
+                      <td className="px-3 py-2">{row.subject_units ?? "-"}</td>
                       <td className="px-3 py-2">
                         <Badge variant="outline">{row.section || assignedSection || "N/A"}</Badge>
                       </td>

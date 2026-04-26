@@ -20,6 +20,7 @@ type FacultyLoadRecord = {
   section: string | null;
   semester: string | null;
   academic_year: string | null;
+  subject_units: number | null;
   teaching_units: number | null;
 };
 
@@ -61,7 +62,7 @@ export default function Subjects() {
   }, [user?.refId]);
 
   const totalUnits = useMemo(
-    () => records.reduce((sum, item) => sum + Number(item.teaching_units || 0), 0),
+    () => records.reduce((sum, item) => sum + Number(item.subject_units ?? item.teaching_units ?? 0), 0),
     [records]
   );
 
@@ -157,7 +158,7 @@ export default function Subjects() {
                     <TableCell>{item.section || "-"}</TableCell>
                     <TableCell>{item.semester || "-"}</TableCell>
                     <TableCell>{item.academic_year || "-"}</TableCell>
-                    <TableCell className="text-right">{item.teaching_units ?? "-"}</TableCell>
+                    <TableCell className="text-right">{item.subject_units ?? item.teaching_units ?? "-"}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

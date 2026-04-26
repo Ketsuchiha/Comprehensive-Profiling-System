@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router";
 import { BookOpen, FileText, Download, ExternalLink, Layers3 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
@@ -6,9 +7,11 @@ import { api } from "../utils/api";
 import { useAuth } from "../context/AuthContext";
 
 type FacultyLoadRecord = {
-  load_id: number;
+  load_id?: number | null;
+  schedule_id?: number | null;
   subject_code: string | null;
   subject_name: string | null;
+  subject_units?: number | null;
   section: string | null;
   semester: string | null;
   academic_year: string | null;
@@ -99,13 +102,21 @@ export default function Modules() {
     setLoadingSubjects(true);
 
     api
-      .get<FacultyLoadRecord[]>(`/faculty/${encodeURIComponent(user.refId)}/load`)
+      .get<FacultyLoadRecord[]>(`/faculty/${encodeURIComponent(user.refId)}/schedules`)
       .then((rows) => {
         if (!isMounted) return;
-        setSubjects(rows);
+        const deduped = Array.from(
+          new Map(
+            (rows || [])
+              .filter((row) => row.subject_code)
+              .map((row) => [String(row.subject_code), row])
+          ).values()
+        );
+
+        setSubjects(deduped);
 
         if (!selectedSubjectCode) {
-          const firstSubjectCode = rows.find((item) => item.subject_code)?.subject_code;
+          const firstSubjectCode = deduped.find((item) => item.subject_code)?.subject_code;
           if (firstSubjectCode) {
             setSelectedSubjectCode(firstSubjectCode);
           }
@@ -206,7 +217,7 @@ export default function Modules() {
           ) : subjects.length === 0 ? (
             <p className="text-sm text-gray-500">No subjects are currently assigned to your teaching load.</p>
           ) : (
-            <div className="max-w-lg">
+            <div className="max-w-lg space-y-3">
               <label htmlFor="subject-filter" className="mb-2 block text-sm font-medium text-gray-700">
                 Subject
               </label>
@@ -219,11 +230,17 @@ export default function Modules() {
                 {subjects
                   .filter((subject) => !!subject.subject_code)
                   .map((subject) => (
-                    <option key={`${subject.load_id}-${subject.subject_code}`} value={subject.subject_code || ""}>
+                    <option key={`${subject.subject_code}`} value={subject.subject_code || ""}>
                       {subject.subject_name || subject.subject_code} ({subject.subject_code})
                     </option>
                   ))}
               </select>
+              <div className="rounded-md border border-orange-200 bg-orange-50 p-3 text-sm text-orange-800">
+                Need to add a new module/syllabus for this subject?
+                <Link to="/authored-syllabi" className="ml-2 font-semibold underline hover:text-orange-900">
+                  Add in Authored Syllabi
+                </Link>
+              </div>
             </div>
           )}
         </CardContent>
