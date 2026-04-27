@@ -469,6 +469,196 @@ router.get('/sections/available', async (req, res) => {
   }
 });
 
+// GET /:id/modules - Student view of syllabus modules for their enrolled subjects
+router.get('/:id/modules', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const subjectCodeFilter = typeof req.query.subject_code === 'string' && req.query.subject_code.trim()
+      ? req.query.subject_code.trim().toUpperCase()
+      : null;
+
+    // Verify the student exists and get their section
+    const [studentRows] = await pool.query(
+      `SELECT s.student_id, COALESCE(NULLIF(s.section, ''), sa.section) AS section
+       FROM students s
+       LEFT JOIN student_academic sa ON sa.student_id = s.student_id
+       WHERE s.student_id = ? LIMIT 1`,
+      [id]
+    );
+    if (studentRows.length === 0) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+
+    const studentSection = studentRows[0].section || null;
+
+    // Collect subject codes from course assignments
+    const subjectCodeSet = new Set();
+
+    try {
+      const [assignmentRows] = await pool.query(
+        `SELECT sca.subject_code, s.subject_name
+         FROM student_course_assignments sca
+         LEFT JOIN subjects s ON s.subject_code = sca.subject_code
+         WHERE sca.student_id = ?`,
+        [id]
+      );
+      for (const row of assignmentRows) {
+        if (row.subject_code) subjectCodeSet.add(row.subject_code);
+      }
+    } catch (err) {
+      if (!isMissingTableError(err)) throw err;
+    }
+
+    // Also collect subject codes from the student's section schedules
+    const enrolledSubjectDetails = [];
+    if (studentSection) {
+      const [scheduleRows] = await pool.query(
+        `SELECT DISTINCT sc.subject_code, s.subject_name, sc.section, sc.semester, sc.academic_year, sc.faculty_id
+         FROM schedules sc
+         LEFT JOIN subjects s ON s.subject_code = sc.subject_code
+         WHERE sc.section = ?
+         ORDER BY sc.academic_year DESC, sc.semester DESC, sc.subject_code`,
+        [studentSection]
+      );
+      for (const row of scheduleRows) {
+        if (row.subject_code) {
+          subjectCodeSet.add(row.subject_code);
+          enrolledSubjectDetails.push(row);
+        }
+      }
+    }
+
+    const enrolledSubjectCodes = Array.from(subjectCodeSet);
+
+    if (enrolledSubjectCodes.length === 0) {
+      return res.json({
+        subject_code_filter: subjectCodeFilter,
+        enrolled_subjects: [],
+        modules: [],
+        warnings: [],
+      });
+    }
+
+    // Apply optional subject filter
+    const filteredCodes = subjectCodeFilter
+      ? enrolledSubjectCodes.filter((code) => code === subjectCodeFilter)
+      : enrolledSubjectCodes;
+
+    let modules = [];
+    let syllabusTablesAvailable = true;
+    const warnings = [];
+
+    if (filteredCodes.length > 0) {
+      try {
+        const placeholders = filteredCodes.map(() => '?').join(', ');
+
+        const [syllabusRows] = await pool.query(
+          `SELECT sy.syllabus_id, sy.subject_code, s.subject_name, sy.faculty_id,
+                  sy.semester, sy.academic_year, sy.course_description,
+                  sy.course_outcomes, sy.grading_system, sy.references_biblio,
+                  sy.approved_by, sy.is_approved, sy.created_at
+           FROM syllabus sy
+           LEFT JOIN subjects s ON sy.subject_code = s.subject_code
+           WHERE sy.subject_code IN (${placeholders})
+           ORDER BY sy.created_at DESC`,
+          filteredCodes
+        );
+
+        if (syllabusRows.length > 0) {
+          const syllabusIds = syllabusRows.map((row) => row.syllabus_id);
+          const syllabusPlaceholders = syllabusIds.map(() => '?').join(', ');
+
+          let topicRows = [];
+          let lessonRows = [];
+
+          try {
+            const [topics] = await pool.query(
+              `SELECT topic_id, syllabus_id, week_number, topic_title, description, teaching_method, assessment
+               FROM syllabus_topics
+               WHERE syllabus_id IN (${syllabusPlaceholders})
+               ORDER BY week_number, topic_id`,
+              syllabusIds
+            );
+            topicRows = topics;
+          } catch (topicErr) {
+            if (!isMissingTableError(topicErr)) throw topicErr;
+          }
+
+          if (topicRows.length > 0) {
+            const topicIds = topicRows.map((row) => row.topic_id);
+            const topicPlaceholders = topicIds.map(() => '?').join(', ');
+
+            try {
+              const [lessons] = await pool.query(
+                `SELECT lesson_id, topic_id, title, content_type, file_path, external_url,
+                        is_published, published_at, created_at
+                 FROM lessons
+                 WHERE topic_id IN (${topicPlaceholders})
+                 ORDER BY created_at DESC, lesson_id DESC`,
+                topicIds
+              );
+              lessonRows = lessons;
+            } catch (lessonErr) {
+              if (!isMissingTableError(lessonErr)) throw lessonErr;
+            }
+          }
+
+          const lessonsByTopicId = new Map();
+          lessonRows.forEach((lesson) => {
+            const entries = lessonsByTopicId.get(lesson.topic_id) || [];
+            entries.push(lesson);
+            lessonsByTopicId.set(lesson.topic_id, entries);
+          });
+
+          const topicsBySyllabusId = new Map();
+          topicRows.forEach((topic) => {
+            const entries = topicsBySyllabusId.get(topic.syllabus_id) || [];
+            entries.push({
+              ...topic,
+              lessons: lessonsByTopicId.get(topic.topic_id) || [],
+            });
+            topicsBySyllabusId.set(topic.syllabus_id, entries);
+          });
+
+          modules = syllabusRows.map((syllabus) => ({
+            ...syllabus,
+            topics: topicsBySyllabusId.get(syllabus.syllabus_id) || [],
+          }));
+        }
+      } catch (syllabusErr) {
+        if (!isMissingTableError(syllabusErr)) throw syllabusErr;
+        syllabusTablesAvailable = false;
+        warnings.push('Syllabus tables are not available in this database yet.');
+      }
+    }
+
+    if (!syllabusTablesAvailable) {
+      warnings.push('Syllabus tables are not available in this database yet.');
+    }
+
+    // Build enrolled subjects list for the dropdown
+    const subjectNameMap = new Map();
+    for (const row of enrolledSubjectDetails) {
+      if (!subjectNameMap.has(row.subject_code)) {
+        subjectNameMap.set(row.subject_code, row.subject_name);
+      }
+    }
+    const enrolledSubjects = enrolledSubjectCodes.map((code) => ({
+      subject_code: code,
+      subject_name: subjectNameMap.get(code) || null,
+    }));
+
+    res.json({
+      subject_code_filter: subjectCodeFilter,
+      enrolled_subjects: enrolledSubjects,
+      modules,
+      warnings,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /:id - Get single student with all related data
 router.get('/:id', async (req, res) => {
   try {
@@ -582,7 +772,7 @@ router.get('/:id/dashboard', async (req, res) => {
   }
 });
 
-// POST /:id/change-password - Student self-service password change
+
 router.post('/:id/change-password', async (req, res) => {
   try {
     const { id } = req.params;
