@@ -31,10 +31,46 @@ type EventRecord = {
   status: string | null;
 };
 
+type ScheduleRecord = {
+  schedule_id: number;
+  subject_code: string | null;
+  subject_name: string | null;
+  section: string | null;
+  day_of_week: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  room_name: string | null;
+  building: string | null;
+};
+
+const dayOrder: Record<string, number> = {
+  Monday: 1,
+  Tuesday: 2,
+  Wednesday: 3,
+  Thursday: 4,
+  Friday: 5,
+  Saturday: 6,
+  Sunday: 7,
+};
+
+function normalizeTime(value: string | null) {
+  if (!value) return "";
+  return value.length === 5 ? `${value}:00` : value;
+}
+
+function formatTime(value: string | null) {
+  const normalized = normalizeTime(value);
+  if (!normalized) return "TBA";
+  const date = new Date(`1970-01-01T${normalized}`);
+  if (Number.isNaN(date.getTime())) return value || "TBA";
+  return date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+}
+
 export default function Dashboard() {
   const { user } = useAuth();
   const [dashboard, setDashboard] = useState<FacultyDashboardResponse | null>(null);
   const [events, setEvents] = useState<EventRecord[]>([]);
+  const [schedules, setSchedules] = useState<ScheduleRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -52,11 +88,13 @@ export default function Dashboard() {
     resolveFacultyId(user)
       .then((facultyId) => Promise.all([
         api.get<FacultyDashboardResponse>(`/faculty/${encodeURIComponent(facultyId)}/dashboard`),
+        api.get<ScheduleRecord[]>(`/faculty/${encodeURIComponent(facultyId)}/schedules`).catch(() => []),
         api.get<EventRecord[]>("/events").catch(() => []),
       ]))
-      .then(([dashboardData, eventsData]) => {
+      .then(([dashboardData, schedulesData, eventsData]) => {
         if (!isMounted) return;
         setDashboard(dashboardData);
+        setSchedules(schedulesData);
         setEvents(eventsData);
       })
       .catch((err) => {
@@ -90,6 +128,16 @@ export default function Dashboard() {
       .slice(0, 5);
   }, [events]);
 
+  const sortedSchedules = useMemo(() => {
+    return [...schedules].sort((left, right) => {
+      const leftDay = left.day_of_week ? dayOrder[left.day_of_week] ?? 99 : 99;
+      const rightDay = right.day_of_week ? dayOrder[right.day_of_week] ?? 99 : 99;
+      if (leftDay !== rightDay) return leftDay - rightDay;
+
+      return normalizeTime(left.start_time).localeCompare(normalizeTime(right.start_time));
+    });
+  }, [schedules]);
+
   return (
     <div className="space-y-6">
       <div className="relative overflow-hidden rounded-2xl border border-gray-200">
@@ -112,6 +160,41 @@ export default function Dashboard() {
           {error}
         </div>
       )}
+
+      <Card className="bg-white">
+        <CardHeader>
+          <CardTitle>Your Classes and Time</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {sortedSchedules.length === 0 ? (
+            <p className="text-sm text-gray-500">No classes assigned yet.</p>
+          ) : (
+            sortedSchedules.map((schedule) => (
+              <div key={schedule.schedule_id} className="rounded-lg border border-gray-200 p-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="font-medium text-gray-900">
+                      {schedule.subject_name || schedule.subject_code || "Class"}
+                    </p>
+                    <p className="mt-1 text-sm text-gray-600">
+                      {schedule.subject_code || "Subject"}
+                      {schedule.section ? ` • Section ${schedule.section}` : ""}
+                    </p>
+                  </div>
+                  <Badge variant="outline">
+                    {schedule.day_of_week || "Day TBA"}
+                  </Badge>
+                </div>
+                <p className="mt-2 text-sm text-gray-700">
+                  {formatTime(schedule.start_time)} - {formatTime(schedule.end_time)}
+                  {schedule.room_name ? ` • ${schedule.room_name}` : ""}
+                  {schedule.building ? ` (${schedule.building})` : ""}
+                </p>
+              </div>
+            ))
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 md:grid-cols-4">
         <Card>

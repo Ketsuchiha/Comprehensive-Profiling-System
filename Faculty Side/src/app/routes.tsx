@@ -11,6 +11,7 @@ import AssignedClasses from "./pages/AssignedClasses";
 import TeachingUnits from "./pages/TeachingUnits";
 import ResearchOutputs from "./pages/ResearchOutputs";
 import AuthoredSyllabi from "./pages/AuthoredSyllabi";
+import StudentGrading from "./pages/StudentGrading";
 
 export const router = createBrowserRouter([
   {
@@ -31,6 +32,7 @@ export const router = createBrowserRouter([
       { path: "modules", Component: Modules },
       { path: "schedule", Component: Schedule },
       { path: "assigned-classes", Component: AssignedClasses },
+      { path: "student-grading", Component: StudentGrading },
       { path: "teaching-units", Component: TeachingUnits },
       { path: "research-outputs", Component: ResearchOutputs },
       { path: "authored-syllabi", Component: AuthoredSyllabi },

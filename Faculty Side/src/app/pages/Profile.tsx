@@ -425,108 +425,6 @@ export default function Profile() {
 
       <Card className="bg-white">
         <CardHeader className="border-b border-gray-100">
-          <CardTitle>Teaching Profile Mapping</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-6">
-          <div className="overflow-x-auto rounded-lg border border-gray-200">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-left text-gray-600">
-                <tr>
-                  <th className="px-3 py-2">Subject Code</th>
-                  <th className="px-3 py-2">Subject</th>
-                  <th className="px-3 py-2">Section</th>
-                  <th className="px-3 py-2">Semester</th>
-                  <th className="px-3 py-2">Academic Year</th>
-                  <th className="px-3 py-2">Teaching Units</th>
-                </tr>
-              </thead>
-              <tbody>
-                {faculty.load.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="px-3 py-3 text-gray-500">No teaching load records.</td>
-                  </tr>
-                )}
-                {faculty.load.map((item) => (
-                  <tr key={item.load_id} className="border-t border-gray-100">
-                    <td className="px-3 py-2">{item.subject_code || "-"}</td>
-                    <td className="px-3 py-2">{item.subject_name || "-"}</td>
-                    <td className="px-3 py-2">{item.section || "-"}</td>
-                    <td className="px-3 py-2">{item.semester || "-"}</td>
-                    <td className="px-3 py-2">{item.academic_year || "-"}</td>
-                    <td className="px-3 py-2">{item.teaching_units ?? "-"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="bg-white">
-        <CardHeader className="border-b border-gray-100">
-          <CardTitle>Performance and Research Mapping</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-6 space-y-4">
-          <div className="overflow-x-auto rounded-lg border border-gray-200">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-left text-gray-600">
-                <tr>
-                  <th className="px-3 py-2">Semester</th>
-                  <th className="px-3 py-2">Academic Year</th>
-                  <th className="px-3 py-2">Student Evaluation Score</th>
-                  <th className="px-3 py-2">Peer Evaluation Score</th>
-                </tr>
-              </thead>
-              <tbody>
-                {faculty.evaluations.length === 0 && (
-                  <tr>
-                    <td colSpan={4} className="px-3 py-3 text-gray-500">No evaluation records.</td>
-                  </tr>
-                )}
-                {faculty.evaluations.map((item) => (
-                  <tr key={item.eval_id} className="border-t border-gray-100">
-                    <td className="px-3 py-2">{item.semester || "-"}</td>
-                    <td className="px-3 py-2">{item.academic_year || "-"}</td>
-                    <td className="px-3 py-2">{item.student_eval_score ?? "-"}</td>
-                    <td className="px-3 py-2">{item.peer_eval_score ?? "-"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="overflow-x-auto rounded-lg border border-gray-200">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-left text-gray-600">
-                <tr>
-                  <th className="px-3 py-2">Research Title</th>
-                  <th className="px-3 py-2">Publication Type</th>
-                  <th className="px-3 py-2">Year</th>
-                  <th className="px-3 py-2">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {faculty.research.length === 0 && (
-                  <tr>
-                    <td colSpan={4} className="px-3 py-3 text-gray-500">No research records.</td>
-                  </tr>
-                )}
-                {faculty.research.map((item) => (
-                  <tr key={item.research_id} className="border-t border-gray-100">
-                    <td className="px-3 py-2">{item.research_title || "-"}</td>
-                    <td className="px-3 py-2">{item.publication_type || "-"}</td>
-                    <td className="px-3 py-2">{item.year_published || "-"}</td>
-                    <td className="px-3 py-2">{item.status || "-"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="bg-white">
-        <CardHeader className="border-b border-gray-100">
           <CardTitle>Account Reference</CardTitle>
         </CardHeader>
         <CardContent className="pt-6">
@@ -536,16 +434,6 @@ export default function Profile() {
             </p>
             <p className="mt-1 font-medium text-gray-900">{user?.refId || faculty.faculty_id}</p>
           </div>
-          <div className="mt-4 rounded-lg border border-gray-100 bg-gray-50 p-4">
-            <p className="flex items-center gap-2 text-xs uppercase tracking-wide text-gray-500">
-              <Briefcase className="h-3 w-3" /> Validation Snapshot
-            </p>
-            <p className="mt-1 text-sm text-gray-700">
-              Required profile fields are sourced from table faculty and linked tables: faculty_employment, faculty_education,
-              faculty_load, faculty_evaluation, faculty_research, and faculty_expertise_certifications.
-            </p>
-          </div>
-
           <div className="mt-4 rounded-lg border border-indigo-100 bg-indigo-50 p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="flex items-center gap-2 text-xs uppercase tracking-wide text-indigo-700">
