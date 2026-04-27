@@ -401,6 +401,74 @@ router.get('/', async (req, res) => {
   }
 });
 
+// GET /sections/available - List sections for selected year (and optional program)
+router.get('/sections/available', async (req, res) => {
+  try {
+    const yearLevelValue = Number.parseInt(String(req.query.year_level || ''), 10);
+    if (!Number.isFinite(yearLevelValue) || yearLevelValue < 1 || yearLevelValue > 10) {
+      return res.json([]);
+    }
+
+    const programValue = normalizeOptionalString(req.query.program);
+    const whereClauses = [
+      'resolved_section IS NOT NULL',
+      "resolved_section <> ''",
+      "UPPER(resolved_section) <> 'UNASSIGNED'",
+      'resolved_year_level = ?',
+    ];
+    const params = [yearLevelValue];
+
+    if (programValue) {
+      whereClauses.push('resolved_program = ?');
+      params.push(programValue);
+    }
+
+    const [rows] = await pool.query(
+      `SELECT resolved_section AS section, COUNT(*) AS student_count
+       FROM (
+         SELECT
+           s.student_id,
+           COALESCE(NULLIF(s.section, ''), sa.section) AS resolved_section,
+           sa.year_level AS resolved_year_level,
+           sa.program AS resolved_program
+         FROM students s
+         LEFT JOIN student_academic sa ON sa.student_id = s.student_id
+       ) section_rows
+       WHERE ${whereClauses.join(' AND ')}
+       GROUP BY resolved_section, resolved_year_level, resolved_program
+       ORDER BY resolved_section`,
+      params
+    );
+
+    if (rows.length > 0) {
+      return res.json(rows);
+    }
+
+    // Fallback: derive sections from schedules for the selected year when student data is sparse.
+    const scheduleParams = [`%-${yearLevelValue}%`];
+    const scheduleWhere = ["section IS NOT NULL", "section <> ''", "UPPER(section) <> 'UNASSIGNED'", 'section LIKE ?'];
+
+    if (programValue === 'BSIT') {
+      scheduleWhere.push("UPPER(section) LIKE 'IT-%'");
+    } else if (programValue === 'BSCS') {
+      scheduleWhere.push("UPPER(section) LIKE 'CS-%'");
+    }
+
+    const [scheduleRows] = await pool.query(
+      `SELECT section, 0 AS student_count
+       FROM schedules
+       WHERE ${scheduleWhere.join(' AND ')}
+       GROUP BY section
+       ORDER BY section`,
+      scheduleParams
+    );
+
+    res.json(scheduleRows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /:id - Get single student with all related data
 router.get('/:id', async (req, res) => {
   try {
@@ -1032,6 +1100,64 @@ router.put('/:id/academic', async (req, res) => {
 
 // ─── GRADES ─────────────────────────────────────────────────────
 
+async function assertFacultyCanGradeStudent({ facultyId, studentId, subjectCode }) {
+  const normalizedFacultyId = normalizeOptionalString(facultyId);
+  const normalizedSubjectCode = normalizeCourseCode(subjectCode);
+  const normalizedStudentId = normalizeOptionalString(studentId);
+
+  if (!normalizedFacultyId) return;
+
+  if (!normalizedStudentId || !normalizedSubjectCode) {
+    const err = new Error('Faculty grading validation requires student_id and subject_code.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const [teachingRows] = await pool.query(
+    `SELECT 1
+     FROM schedules sc
+     LEFT JOIN students st ON st.student_id = ?
+     LEFT JOIN student_academic sa ON sa.student_id = ?
+     WHERE sc.faculty_id = ?
+       AND sc.subject_code = ?
+       AND (
+         COALESCE(NULLIF(sc.section, ''), '__ALL__') = '__ALL__'
+         OR COALESCE(NULLIF(st.section, ''), sa.section) = sc.section
+       )
+     LIMIT 1`,
+    [normalizedStudentId, normalizedStudentId, normalizedFacultyId, normalizedSubjectCode]
+  );
+
+  if (teachingRows.length === 0) {
+    const err = new Error('You can only grade students in subjects and sections you are assigned to teach.');
+    err.statusCode = 403;
+    throw err;
+  }
+
+  try {
+    const [assignmentRows] = await pool.query(
+      `SELECT 1
+       FROM student_course_assignments
+       WHERE student_id = ? AND subject_code = ?
+       LIMIT 1`,
+      [normalizedStudentId, normalizedSubjectCode]
+    );
+
+    if (assignmentRows.length === 0) {
+      const err = new Error('This student is not registered in the selected subject.');
+      err.statusCode = 400;
+      throw err;
+    }
+  } catch (err) {
+    if (isMissingTableError(err)) {
+      const tableErr = new Error('student_course_assignments table not found. Apply SQL migration first.');
+      tableErr.statusCode = 500;
+      throw tableErr;
+    }
+    throw err;
+  }
+}
+
 // GET /:id/grades
 router.get('/:id/grades', async (req, res) => {
   try {
@@ -1053,7 +1179,13 @@ router.get('/:id/grades', async (req, res) => {
 router.post('/:id/grades', async (req, res) => {
   try {
     const { id } = req.params;
-    const { subject_code, semester, academic_year, midterm_grade, final_grade, gpa, remarks } = req.body;
+    const { subject_code, semester, academic_year, midterm_grade, final_grade, gpa, remarks, faculty_id } = req.body;
+
+    await assertFacultyCanGradeStudent({
+      facultyId: faculty_id,
+      studentId: id,
+      subjectCode: subject_code,
+    });
 
     const [result] = await pool.query(
       `INSERT INTO student_grades (student_id, subject_code, semester, academic_year, midterm_grade, final_grade, gpa, remarks)
@@ -1063,6 +1195,9 @@ router.post('/:id/grades', async (req, res) => {
 
     res.status(201).json({ message: 'Grade added', grade_id: result.insertId });
   } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
     res.status(500).json({ error: err.message });
   }
 });
@@ -1071,7 +1206,24 @@ router.post('/:id/grades', async (req, res) => {
 router.put('/grades/:gradeId', async (req, res) => {
   try {
     const { gradeId } = req.params;
-    const { subject_code, semester, academic_year, midterm_grade, final_grade, gpa, remarks } = req.body;
+    const { subject_code, semester, academic_year, midterm_grade, final_grade, gpa, remarks, faculty_id } = req.body;
+
+    if (normalizeOptionalString(faculty_id)) {
+      const [gradeRows] = await pool.query(
+        'SELECT student_id, subject_code FROM student_grades WHERE grade_id = ? LIMIT 1',
+        [gradeId]
+      );
+
+      if (gradeRows.length === 0) {
+        return res.status(404).json({ error: 'Grade not found' });
+      }
+
+      await assertFacultyCanGradeStudent({
+        facultyId: faculty_id,
+        studentId: gradeRows[0].student_id,
+        subjectCode: subject_code || gradeRows[0].subject_code,
+      });
+    }
 
     const [result] = await pool.query(
       `UPDATE student_grades SET subject_code = COALESCE(?, subject_code), semester = COALESCE(?, semester),
@@ -1084,6 +1236,9 @@ router.put('/grades/:gradeId', async (req, res) => {
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Grade not found' });
     res.json({ message: 'Grade updated successfully' });
   } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
     res.status(500).json({ error: err.message });
   }
 });
@@ -1150,7 +1305,18 @@ router.get('/:id/schedules', async (req, res) => {
 router.get('/:id/events', async (req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT e.*, ep.participation_id, ep.attendance
+      `SELECT e.*, ep.participation_id, ep.attendance,
+              (
+                SELECT COUNT(*)
+                FROM event_participants ep_total
+                WHERE ep_total.event_id = e.event_id
+              ) AS participant_count,
+              (
+                SELECT COUNT(*)
+                FROM event_participants ep_students
+                WHERE ep_students.event_id = e.event_id
+                  AND ep_students.participant_type = 'Student'
+              ) AS student_participant_count
        FROM event_participants ep
        INNER JOIN events e ON ep.event_id = e.event_id
        WHERE ep.participant_id = ? AND ep.participant_type = 'Student'

@@ -69,7 +69,8 @@ router.get('/', async (req, res) => {
 
     if (!pagination) {
       const [rows] = await pool.query(
-        `SELECT e.*, COUNT(ep.participation_id) AS participant_count
+        `SELECT e.*, COUNT(ep.participation_id) AS participant_count,
+               COUNT(CASE WHEN ep.participant_type = 'Student' THEN 1 END) AS student_participant_count
          FROM events e
          LEFT JOIN event_participants ep ON e.event_id = ep.event_id
          ${whereClause}
@@ -88,7 +89,8 @@ router.get('/', async (req, res) => {
     );
 
     const [rows] = await pool.query(
-      `SELECT e.*, COUNT(ep.participation_id) AS participant_count
+      `SELECT e.*, COUNT(ep.participation_id) AS participant_count,
+             COUNT(CASE WHEN ep.participant_type = 'Student' THEN 1 END) AS student_participant_count
        FROM events e
        LEFT JOIN event_participants ep ON e.event_id = ep.event_id
        ${whereClause}
@@ -209,6 +211,25 @@ router.put('/participants/:participationId', async (req, res) => {
   try {
     const { participationId } = req.params;
     const { attendance } = req.body;
+
+    if (attendance === 'Attended') {
+      const [rows] = await pool.query(
+        `SELECT ep.participation_id, e.start_date
+         FROM event_participants ep
+         INNER JOIN events e ON e.event_id = ep.event_id
+         WHERE ep.participation_id = ?`,
+        [participationId]
+      );
+
+      if (rows.length === 0) {
+        return res.status(404).json({ error: 'Participant not found' });
+      }
+
+      const startDate = new Date(rows[0].start_date);
+      if (!Number.isNaN(startDate.getTime()) && Date.now() < startDate.getTime()) {
+        return res.status(400).json({ error: 'Attendance can only be marked after the event starts' });
+      }
+    }
 
     const [result] = await pool.query(
       'UPDATE event_participants SET attendance = ? WHERE participation_id = ?',
