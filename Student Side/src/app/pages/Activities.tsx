@@ -1,9 +1,17 @@
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { Users, Briefcase, Clock, BookOpen, CalendarDays, MapPin } from "lucide-react";
+import { Users, Briefcase, Clock, BookOpen, CalendarDays, MapPin, CircleCheckBig } from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../utils/api";
 import { useAuth } from "../context/AuthContext";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog";
 
 type OrgRecord = {
   org_id: number;
@@ -46,6 +54,20 @@ type EventRecord = {
   end_date: string;
   status: string | null;
   attendance: string | null;
+  participation_id?: number | null;
+  participant_count?: number | null;
+  student_participant_count?: number | null;
+};
+
+type EventSummaryRecord = {
+  event_id: number;
+  participant_count: number | null;
+  student_participant_count: number | null;
+};
+
+type StatusMessage = {
+  type: "success" | "error";
+  message: string;
 };
 
 function formatMonthYear(value: string | null) {
@@ -96,7 +118,12 @@ export default function Activities() {
   const [internships, setInternships] = useState<InternshipRecord[]>([]);
   const [schedules, setSchedules] = useState<ScheduleRecord[]>([]);
   const [events, setEvents] = useState<EventRecord[]>([]);
+  const [eventSummary, setEventSummary] = useState<EventSummaryRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedEvent, setSelectedEvent] = useState<EventRecord | null>(null);
+  const [isEventDialogOpen, setIsEventDialogOpen] = useState(false);
+  const [isUpdatingAttendance, setIsUpdatingAttendance] = useState(false);
+  const [eventStatus, setEventStatus] = useState<StatusMessage | null>(null);
 
   useEffect(() => {
     if (!user?.refId) {
@@ -112,13 +139,15 @@ export default function Activities() {
       api.get<InternshipRecord[]>(`/students/${encodeURIComponent(user.refId)}/internships`).catch(() => []),
       api.get<ScheduleRecord[]>(`/students/${encodeURIComponent(user.refId)}/schedules`).catch(() => []),
       api.get<EventRecord[]>(`/students/${encodeURIComponent(user.refId)}/events`).catch(() => []),
+      api.get<EventSummaryRecord[]>(`/events`).catch(() => []),
     ])
-      .then(([orgs, internshipsData, schedulesData, eventsData]) => {
+      .then(([orgs, internshipsData, schedulesData, eventsData, eventSummaryData]) => {
         if (!isMounted) return;
         setOrganizations(orgs);
         setInternships(internshipsData);
         setSchedules(schedulesData);
         setEvents(eventsData);
+        setEventSummary(eventSummaryData);
       })
       .finally(() => {
         if (!isMounted) return;
@@ -149,6 +178,31 @@ export default function Activities() {
     0
   ), [internships]);
 
+  const eventSummaryMap = useMemo(() => {
+    return new Map(eventSummary.map((item) => [String(item.event_id), item]));
+  }, [eventSummary]);
+
+  const mergedEvents = useMemo(
+    () => [...events].map((event) => {
+      const summary = eventSummaryMap.get(String(event.event_id));
+      const participantCount = Number(summary?.participant_count ?? event.participant_count ?? 0);
+      const studentParticipantCount = Number(
+        summary?.student_participant_count
+        ?? event.student_participant_count
+        ?? summary?.participant_count
+        ?? event.participant_count
+        ?? 0
+      );
+
+      return {
+        ...event,
+        participant_count: participantCount,
+        student_participant_count: studentParticipantCount,
+      };
+    }),
+    [eventSummaryMap, events]
+  );
+
   const sortedSchedules = useMemo(
     () => [...schedules].sort((left, right) => {
       const dayDiff = daySortWeight(left.day_of_week) - daySortWeight(right.day_of_week);
@@ -159,6 +213,64 @@ export default function Activities() {
     }),
     [schedules]
   );
+
+  const formatEventDateState = (event: EventRecord) => {
+    const startDate = new Date(event.start_date);
+    if (Number.isNaN(startDate.getTime())) return false;
+    return startDate.getTime() <= Date.now();
+  };
+
+  const openEventDialog = (event: EventRecord) => {
+    setSelectedEvent(event);
+    setEventStatus(null);
+    setIsEventDialogOpen(true);
+  };
+
+  const handleMarkAttended = async () => {
+    if (!selectedEvent?.participation_id) {
+      setEventStatus({
+        type: "error",
+        message: "This event does not have a participation record in the database.",
+      });
+      return;
+    }
+
+    if (!formatEventDateState(selectedEvent)) {
+      setEventStatus({
+        type: "error",
+        message: "You can only mark attendance after the event has started.",
+      });
+      return;
+    }
+
+    setIsUpdatingAttendance(true);
+    setEventStatus(null);
+
+    try {
+      await api.put<{ message: string }>(`/events/participants/${selectedEvent.participation_id}`, {
+        attendance: "Attended",
+      });
+
+      setEvents((previous) => previous.map((event) => (
+        event.participation_id === selectedEvent.participation_id
+          ? { ...event, attendance: "Attended" }
+          : event
+      )));
+      setSelectedEvent((previous) => (previous ? { ...previous, attendance: "Attended" } : previous));
+      setEventStatus({
+        type: "success",
+        message: "Attendance marked as attended successfully.",
+      });
+      setIsEventDialogOpen(false);
+    } catch (err) {
+      setEventStatus({
+        type: "error",
+        message: err instanceof Error ? err.message : "Failed to update event attendance.",
+      });
+    } finally {
+      setIsUpdatingAttendance(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -426,8 +538,13 @@ export default function Activities() {
             <p className="text-sm text-gray-500">No event participation records found.</p>
           ) : (
             <div className="space-y-3">
-              {events.map((event) => (
-                <div key={event.event_id} className="rounded-lg border bg-orange-50 p-4">
+              {mergedEvents.map((event) => (
+                <button
+                  key={event.event_id}
+                  type="button"
+                  onClick={() => openEventDialog(event)}
+                  className="w-full rounded-lg border bg-orange-50 p-4 text-left transition-all hover:-translate-y-0.5 hover:border-orange-300 hover:shadow-sm"
+                >
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
                       <h4 className="font-semibold text-gray-900">{event.title}</h4>
@@ -452,12 +569,81 @@ export default function Activities() {
                       <span>{event.venue || "Venue TBA"}</span>
                     </p>
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={isEventDialogOpen} onOpenChange={setIsEventDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Event Participation</DialogTitle>
+            <DialogDescription>
+              Review the event record and confirm attendance only when the event has already started.
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedEvent && (
+            <div className="space-y-3">
+              <div className="rounded-lg border border-gray-100 bg-gray-50 p-4">
+                <p className="text-sm font-semibold text-gray-900">{selectedEvent.title}</p>
+                <p className="mt-1 text-sm text-gray-600">{selectedEvent.event_type || "Event"}</p>
+              </div>
+
+              <div className="space-y-1 text-sm text-gray-700">
+                <p>
+                  <span className="font-medium">Start:</span> {formatDateTimeValue(selectedEvent.start_date)}
+                </p>
+                <p>
+                  <span className="font-medium">End:</span> {formatDateTimeValue(selectedEvent.end_date)}
+                </p>
+                <p>
+                  <span className="font-medium">Current attendance:</span> {selectedEvent.attendance || "Registered"}
+                </p>
+              </div>
+
+              {!formatEventDateState(selectedEvent) && (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  You cannot mark this event as attended yet because the event has not started.
+                </div>
+              )}
+
+              {eventStatus && (
+                <div
+                  className={`rounded-lg px-3 py-2 text-sm ${
+                    eventStatus.type === "error"
+                      ? "border border-red-200 bg-red-50 text-red-700"
+                      : "border border-green-200 bg-green-50 text-green-700"
+                  }`}
+                >
+                  {eventStatus.message}
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={() => setIsEventDialogOpen(false)}
+              className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              Close
+            </button>
+            <button
+              type="button"
+              onClick={handleMarkAttended}
+              disabled={!selectedEvent || !formatEventDateState(selectedEvent) || isUpdatingAttendance || selectedEvent?.attendance === "Attended"}
+              className="inline-flex items-center gap-2 rounded-lg bg-orange-600 px-4 py-2 text-sm font-medium text-white hover:bg-orange-700 disabled:cursor-not-allowed disabled:bg-orange-300"
+            >
+              <CircleCheckBig className="h-4 w-4" />
+              {isUpdatingAttendance ? "Saving..." : selectedEvent?.attendance === "Attended" ? "Already Attended" : "Mark Attended"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { AlertCircle, Calendar as CalendarIcon, TrendingUp, BookOpen, Bell, MapPin, Clock } from "lucide-react";
+import { AlertCircle, Calendar as CalendarIcon, TrendingUp, BookOpen, MapPin, Clock } from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../utils/api";
@@ -115,6 +115,32 @@ export default function Dashboard() {
     }
   };
 
+  const getViolationStatusLabel = (status: string | null) => {
+    switch (status) {
+      case "Resolved":
+        return "Settled";
+      case "Dismissed":
+        return "Closed";
+      case "Active":
+        return "Under Review";
+      default:
+        return "Recorded";
+    }
+  };
+
+  const getViolationStatusColor = (status: string | null) => {
+    switch (status) {
+      case "Resolved":
+        return "bg-green-100 text-green-800 border-green-300";
+      case "Dismissed":
+        return "bg-gray-100 text-gray-700 border-gray-300";
+      case "Active":
+        return "bg-orange-100 text-orange-800 border-orange-300";
+      default:
+        return "bg-gray-100 text-gray-700 border-gray-300";
+    }
+  };
+
   useEffect(() => {
     if (!user?.refId) {
       setLoading(false);
@@ -223,18 +249,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="flex justify-end">
-        <button
-          type="button"
-          aria-label="Notifications"
-          title="Notifications"
-          className="relative p-2 text-gray-400 hover:text-gray-600"
-        >
-          <Bell className="h-6 w-6" />
-          <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
-        </button>
-      </div>
-
       {/* Stats Cards */}
       <div className="grid gap-4 md:grid-cols-3">
         <Card className="border-orange-100 bg-white hover:shadow-md transition-shadow">
@@ -255,7 +269,7 @@ export default function Dashboard() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-600">Active Violations</p>
+                <p className="text-sm text-gray-600">Open Conduct Reports</p>
                 <p className="text-4xl font-semibold text-orange-600 mt-2">{activeViolationCount}</p>
               </div>
               <div className="w-12 h-12 rounded-xl bg-yellow-100 flex items-center justify-center">
@@ -311,6 +325,9 @@ export default function Dashboard() {
                         <h4 className="font-medium text-gray-900">{violation.violation_type}</h4>
                         <Badge variant="outline" className={`${getSeverityColor(violation.severity || "Warning")} text-xs`}>
                           {violation.severity || "Warning"}
+                        </Badge>
+                        <Badge variant="outline" className={`${getViolationStatusColor(violation.status)} text-xs`}>
+                          {getViolationStatusLabel(violation.status)}
                         </Badge>
                       </div>
                       <p className="text-sm text-gray-600">{violation.description || violation.subject_context || "No description"}</p>
