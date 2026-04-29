@@ -94,7 +94,7 @@ export function Instruments() {
 
   const fetchInstruments = async () => {
     try {
-      const backendBaseUrl = `${window.location.protocol}//${window.location.hostname}:5000`;
+      const backendBaseUrl = (import.meta.env.VITE_BACKEND_ORIGIN || `${window.location.protocol}//${window.location.hostname}:5000`).replace(/\/$/, '');
       const resolveFileUrl = (value: string | null | undefined) => {
         if (!value) return '';
         if (value.startsWith('http://') || value.startsWith('https://')) return value;

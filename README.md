@@ -65,3 +65,40 @@ const dashboard = await api.get(`/students/${studentId}/dashboard`);
 const schedules = await api.get(`/faculty/${facultyId}/schedules`);
 await api.post(`/students/${studentId}/events/${eventId}`, {});
 ```
+
+## 🚀 Deploying with Vercel + Render
+
+Use Vercel for the React frontend and Render for the Express API.
+
+### 1) Deploy the backend on Render
+
+1. Create a new Render web service from the `backend/` folder.
+2. Use `npm install` as the build command and `npm start` as the start command.
+3. Set these environment variables in Render:
+  - `DB_HOST`
+  - `DB_USER`
+  - `DB_PASSWORD`
+  - `DB_NAME`
+  - `DB_PORT`
+4. Make sure your MySQL/MariaDB instance is reachable from Render.
+5. After deployment, copy the public backend URL, for example `https://your-backend.onrender.com`.
+
+### 2) Deploy the frontend on Vercel
+
+1. Import the repository into Vercel.
+2. Set the project root to the repository root so Vercel builds the Vite app at the top level.
+3. Leave the build command as `npm run build` and the output directory as `dist`.
+4. Add these environment variables in Vercel:
+  - `VITE_API_BASE_URL=https://your-backend.onrender.com/api`
+  - `VITE_BACKEND_ORIGIN=https://your-backend.onrender.com`
+5. Deploy.
+
+### 3) Notes
+
+- `src/app/utils/api.ts` now reads `VITE_API_BASE_URL`, so API calls can point at Render in production.
+- `src/app/pages/Instruments.tsx` now reads `VITE_BACKEND_ORIGIN`, so uploaded file links resolve correctly outside local development.
+- `vercel.json` keeps browser routing working on refresh.
+
+### 4) Local development
+
+For local work, you can keep using the existing Vite proxy and backend on `http://localhost:5000`.
