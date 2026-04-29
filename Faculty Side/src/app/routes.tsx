@@ -11,6 +11,7 @@ import AssignedClasses from "./pages/AssignedClasses";
 import TeachingUnits from "./pages/TeachingUnits";
 import ResearchOutputs from "./pages/ResearchOutputs";
 import AuthoredSyllabi from "./pages/AuthoredSyllabi";
+import { StudentViolations } from "./pages/StudentViolations";
 
 export const router = createBrowserRouter([
   {
@@ -34,6 +35,7 @@ export const router = createBrowserRouter([
       { path: "teaching-units", Component: TeachingUnits },
       { path: "research-outputs", Component: ResearchOutputs },
       { path: "authored-syllabi", Component: AuthoredSyllabi },
+      { path: "student-violations", Component: StudentViolations },
     ],
   },
 ]);

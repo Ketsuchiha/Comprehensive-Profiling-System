@@ -6,6 +6,8 @@ import Profile from "./pages/Profile";
 import AcademicProfile from "./pages/AcademicProfile";
 import AcademicRecords from "./pages/AcademicRecords";
 import Activities from "./pages/Activities";
+import MyViolations from "./pages/MyViolations";
+import ViolationDetails from "./pages/ViolationDetails";
 import Login from "./pages/Login";
 import RouteErrorFallback from "./components/RouteErrorFallback";
 
@@ -29,6 +31,8 @@ export const router = createBrowserRouter([
       { path: "academic-profile", Component: AcademicProfile },
       { path: "academic-records", Component: AcademicRecords },
       { path: "activities", Component: Activities },
+      { path: "my-violations", Component: MyViolations },
+      { path: "my-violations/:violationId", Component: ViolationDetails },
     ],
   },
 ]);

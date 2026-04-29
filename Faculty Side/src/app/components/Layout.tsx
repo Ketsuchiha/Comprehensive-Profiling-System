@@ -9,6 +9,7 @@ import {
   Calculator,
   FlaskConical,
   FileText,
+  ShieldAlert,
   Menu,
   X,
   LogOut
@@ -89,6 +90,7 @@ export default function Layout() {
     { name: "Teaching Units", href: "/teaching-units", icon: Calculator },
     { name: "Research Outputs", href: "/research-outputs", icon: FlaskConical },
     { name: "Authored Syllabi", href: "/authored-syllabi", icon: FileText },
+    { name: "Student Violations", href: "/student-violations", icon: ShieldAlert },
   ];
 
   return (

@@ -1,5 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { AlertCircle, Calendar as CalendarIcon, TrendingUp, BookOpen, Bell, MapPin, Clock } from "lucide-react";
+import { AlertCircle, Calendar as CalendarIcon, TrendingUp, BookOpen, MapPin, Clock } from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../utils/api";
@@ -221,18 +221,6 @@ export default function Dashboard() {
             <p className="mt-1 text-sm text-gray-100">{loading ? "Loading student dashboard..." : displayMeta}</p>
           </div>
         </div>
-      </div>
-
-      <div className="flex justify-end">
-        <button
-          type="button"
-          aria-label="Notifications"
-          title="Notifications"
-          className="relative p-2 text-gray-400 hover:text-gray-600"
-        >
-          <Bell className="h-6 w-6" />
-          <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
-        </button>
       </div>
 
       {/* Stats Cards */}

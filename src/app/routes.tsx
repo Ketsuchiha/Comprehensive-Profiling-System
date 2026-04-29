@@ -1,4 +1,4 @@
-import { createBrowserRouter } from "react-router";
+import { createBrowserRouter, Navigate } from "react-router";
 import { Dashboard } from "./pages/Dashboard";
 import { StudentProfile } from "./pages/StudentProfile";
 import { FacultyProfile } from "./pages/FacultyProfile";
@@ -41,5 +41,9 @@ export const router = createBrowserRouter([
       { path: "research", Component: CollegeResearch },
       { path: "instruments", Component: Instruments },
     ],
+  },
+  {
+    path: "*",
+    element: <Navigate to="/" replace />,
   },
 ]);

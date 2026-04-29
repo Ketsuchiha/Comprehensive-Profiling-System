@@ -1183,6 +1183,33 @@ router.get('/:id/violations', async (req, res) => {
   }
 });
 
+// GET /:id/violations/:violationId - Get specific violation for a student
+router.get('/:id/violations/:violationId', async (req, res) => {
+  try {
+    if (!(await hasStudentViolationsTable())) {
+      return res.status(404).json({ error: 'Violation not found' });
+    }
+
+    const { id, violationId } = req.params;
+
+    const [rows] = await pool.query(
+      `SELECT violation_id, student_id, violation_type, subject_context, description, severity, status, incident_date, reported_by, created_at
+       FROM student_violations
+       WHERE student_id = ? AND violation_id = ?
+       LIMIT 1`,
+      [id, violationId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Violation not found' });
+    }
+
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /:id/events/:eventId - Register student to event
 router.post('/:id/events/:eventId', async (req, res) => {
   try {

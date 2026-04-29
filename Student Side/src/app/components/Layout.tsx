@@ -5,6 +5,7 @@ import {
   GraduationCap, 
   BookOpen, 
   Trophy,
+  ShieldAlert,
   Menu,
   X,
   LogOut
@@ -40,6 +41,7 @@ export default function Layout() {
     { name: "Academic", href: "/academic-profile", icon: GraduationCap },
     { name: "Records", href: "/academic-records", icon: BookOpen },
     { name: "Activities", href: "/activities", icon: Trophy },
+    { name: "My Violations", href: "/my-violations", icon: ShieldAlert },
   ];
 
   return (
