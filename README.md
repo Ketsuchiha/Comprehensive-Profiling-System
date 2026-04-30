@@ -108,6 +108,7 @@ Railway can run the frontend and backend from the repository root with the updat
 - `src/app/utils/api.ts` now reads `VITE_API_BASE_URL`, so API calls can point at Render in production.
 - `src/app/pages/Instruments.tsx` now reads `VITE_BACKEND_ORIGIN`, so uploaded file links resolve correctly outside local development.
 - `vercel.json` keeps browser routing working on refresh.
+- `backend/config/db.js` accepts either `DB_*` env vars or Railway/MySQL plugin vars such as `MYSQLHOST`, `MYSQLUSER`, `MYSQLPASSWORD`, `MYSQLDATABASE`, and `MYSQLPORT`.
 
 ### 4) Local development
 
