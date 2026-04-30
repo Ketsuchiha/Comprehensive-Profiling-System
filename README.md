@@ -102,3 +102,27 @@ Use Vercel for the React frontend and Render for the Express API.
 ### 4) Local development
 
 For local work, you can keep using the existing Vite proxy and backend on `http://localhost:5000`.
+
+## ☁️ Deploying with Cloudflare
+
+Cloudflare Pages can host the frontend, but the Express + MySQL backend cannot run on Cloudflare Workers as-is.
+
+### Recommended Cloudflare setup
+
+1. Deploy the frontend to Cloudflare Pages from the repository root.
+2. Set the build command to `npm run build`.
+3. Set the output directory to `dist`.
+4. Add these environment variables in Cloudflare Pages:
+  - `VITE_API_BASE_URL=https://your-backend-domain.com/api`
+  - `VITE_BACKEND_ORIGIN=https://your-backend-domain.com`
+5. Use a separate backend host for the API, such as Render, Railway, Fly.io, or a VM.
+
+### Why the backend cannot be moved directly to Cloudflare Workers
+
+- The backend uses Express middleware and routing.
+- The backend connects to MySQL through `mysql2`, which expects a TCP database connection.
+- Cloudflare Workers do not run a normal Node.js server and cannot use that backend unchanged.
+
+### SPA routing on Cloudflare Pages
+
+The file `public/_redirects` is included so client-side routes like `/students` and `/faculty` reload correctly on Cloudflare Pages.
