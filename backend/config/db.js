@@ -14,12 +14,18 @@ function resolveMysqlConfig() {
     };
   }
 
+  const railwayHost = process.env.MYSQLHOST;
+  const railwayUser = process.env.MYSQLUSER;
+  const railwayPassword = process.env.MYSQLPASSWORD;
+  const railwayDatabase = process.env.MYSQLDATABASE;
+  const railwayPort = process.env.MYSQLPORT;
+
   return {
-    host: process.env.DB_HOST || process.env.MYSQLHOST || '127.0.0.1',
-    user: process.env.DB_USER || process.env.MYSQLUSER || 'root',
-    password: process.env.DB_PASSWORD || process.env.MYSQLPASSWORD || '',
-    database: process.env.DB_NAME || process.env.MYSQLDATABASE || 'ccs113',
-    port: Number(process.env.DB_PORT || process.env.MYSQLPORT || 3306),
+    host: railwayHost || process.env.DB_HOST || '127.0.0.1',
+    user: railwayUser || process.env.DB_USER || 'root',
+    password: railwayPassword || process.env.DB_PASSWORD || '',
+    database: railwayDatabase || process.env.DB_NAME || 'ccs113',
+    port: Number(railwayPort || process.env.DB_PORT || 3306),
   };
 }
 
