@@ -32,7 +32,7 @@ The CCS Comprehensive Profiling System aims to replace manual filing systems wit
 ## 🧱 Tech Stack
 - Frontend: React + TypeScript (Vite)
 - Backend: Node.js + Express
-- Database: MySQL / MariaDB (`ccs123`)
+- Database: MySQL / MariaDB (`ccs113-26-26`)
 
 ## 🔌 Role API Coverage (Teacher/Student)
 The backend now includes role-oriented endpoints that map to Teacher and Student portal needs:
