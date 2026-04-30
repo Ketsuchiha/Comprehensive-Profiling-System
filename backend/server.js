@@ -6,6 +6,7 @@ const cors = require('cors');
 const pool = require('./config/db');
 
 const app = express();
+const clientDistPath = path.resolve(__dirname, '..', 'dist');
 
 app.use(cors());
 app.use(express.json({ limit: '25mb' }));
@@ -13,7 +14,7 @@ app.use(express.urlencoded({ limit: '25mb', extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Health check
-app.get('/', (req, res) => {
+app.get('/api/health', (req, res) => {
   res.json({ message: 'CCS Profiling System API is running' });
 });
 
@@ -30,6 +31,16 @@ app.use('/api/rooms', require('./routes/rooms'));
 app.use('/api/research', require('./routes/research'));
 app.use('/api/instruments', require('./routes/instruments'));
 app.use('/api/violations', require('./routes/violations'));
+
+if (require('fs').existsSync(clientDistPath)) {
+  app.use(express.static(clientDistPath));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/') || req.path.startsWith('/uploads/')) {
+      return next();
+    }
+    res.sendFile(path.join(clientDistPath, 'index.html'));
+  });
+}
 
 const PORT = process.env.PORT || 5000;
 

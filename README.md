@@ -70,6 +70,16 @@ await api.post(`/students/${studentId}/events/${eventId}`, {});
 
 Use Vercel for the React frontend and Render for the Express API.
 
+## 🚂 Deploying with Railway
+
+Railway can run the frontend and backend from the repository root with the updated server setup.
+
+1. Set the Railway service root to the repository root.
+2. Use `npm run build` for the build command.
+3. Use `npm start` for the start command.
+4. Set the database environment variables required by `backend/config/db.js`.
+5. Deploy the service, then open `/login` on the Railway URL.
+
 ### 1) Deploy the backend on Render
 
 1. Create a new Render web service from the `backend/` folder.
