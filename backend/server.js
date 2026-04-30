@@ -1,5 +1,13 @@
 const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '.env') });
+const isRailway = Boolean(
+  process.env.RAILWAY_ENVIRONMENT ||
+  process.env.RAILWAY_PROJECT_ID ||
+  process.env.RAILWAY_SERVICE_ID
+);
+
+if (process.env.NODE_ENV !== 'production' && !isRailway) {
+  require('dotenv').config({ path: path.join(__dirname, '.env') });
+}
 
 const express = require('express');
 const cors = require('cors');
